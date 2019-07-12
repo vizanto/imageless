@@ -1,0 +1,3 @@
+projects:
+  lambda-imagegraph:
+    schemaPath: schema.graphql

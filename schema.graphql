@@ -1,0 +1,71 @@
+# Cryptographic hashes encoded using: https://github.com/RGBboy/urlsafe-base64
+# TODO: parsing and validation: https://github.com/prisma/graphql-yoga/issues/229
+scalar URL_Safe_Base64_SHA256
+scalar URL_Safe_Base64_MD5
+
+# Basic types
+scalar URL
+scalar UTC_DateTime
+
+# TODO: Service must limit nesting of Image Collection Image queries
+# https://www.prisma.io/forum/t/question-about-malicious-queries-with-infinite-depth-nested-relations/2628
+
+type Image {
+  # Identifiers
+  id: ID!
+  sha256: URL_Safe_Base64_SHA256!
+  md5:  URL_Safe_Base64_MD5!
+  
+  # Object metadata
+  collections: [Collection!]
+  createdAt: UTC_DateTime!
+  uploadedAt: UTC_DateTime!
+  # blobAvailable: Boolean!
+
+  # File metadata
+  name: String
+  blob: URL! # Not actually stored in DynamoDB as it can be constructed from `name` and `size`
+  size: Int!
+  mimetype: String!
+  
+  # Image metadata
+  width: Int!
+  height: Int!
+}
+
+type Collection {
+  id: ID!
+  name: String!
+  images: [Image!]
+}
+
+type Query {
+  hello: String
+  
+  # Image objects
+  image(id: ID!): Image
+  images(ids: [ID!], sha256s: [URL_Safe_Base64_SHA256!]): [Image!]!
+  
+  # Collections of images
+  collection(id: ID!): Collection
+  collections(ids: [ID!], names: [String]): [Collection!]!
+}
+
+type Mutation {
+  # Create
+  uploadImage(blob: File!, id: ID, name: String, collections: [ID!])
+  createCollection(name: String!, images: [ID!], id: ID)
+  
+  # Update
+  updateImage(id: ID!, name: String, collections: [ID!])
+  addImageToCollections(collections: [ID!]!)
+  removeImageFromCollections(collections: [ID!]!)
+  
+  # Delete
+  deleteImage(id: ID!)
+  deleteCollection(id: ID!)
+  
+  # Error prone operations, "Images and collections should support all CRUD-operations" ...
+  _unchecked_createImage(data: Image!)
+  _unchecked_updateImage(id: ID!, data: Image!) # "Images and collections should support all CRUD-operations" ...
+}

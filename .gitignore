@@ -1,0 +1,18 @@
+# package directories
+node_modules
+jspm_packages
+
+# Serverless directories
+.serverless
+.dynamodb
+
+# Webpack directories
+.webpack
+
+# Compiler output
+lib/
+out/
+
+# Junk
+.DS_Store
+*.log

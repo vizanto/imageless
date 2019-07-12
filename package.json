@@ -1,0 +1,35 @@
+{
+  "name": "lambda-imagegraph",
+  "version": "1.0.0",
+  "description": "GraphQL Image collection API on AWS Lambda example using Typescript",
+  "main": "handler.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@divyenduz/ts-graphql-plugin": "divyenduz/ts-graphql-plugin",
+    "aws-amplify": "^1.1.30",
+    "bufferutil": "^4.0.1",
+    "graphql-depth-limit": "^1.1.0",
+    "graphql-upload": "^8.0.7",
+    "graphql-yoga": "^1.18.0",
+    "source-map-support": "^0.5.10",
+    "urlsafe-base64": "^1.0.0",
+    "utf-8-validate": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.17",
+    "@types/node": "^10.12.18",
+    "graphql-cli": "^3.0.11",
+    "serverless": "^1.47.0",
+    "serverless-dynamodb-local": "^0.2.38",
+    "serverless-offline": "^5.7.2",
+    "serverless-webpack": "^5.2.0",
+    "ts-loader": "^5.3.3",
+    "typescript": "^3.2.4",
+    "webpack": "^4.29.0",
+    "webpack-cli": "^3.3.5"
+  },
+  "author": "Danny Wilson <git@danny.prime.vc>",
+  "license": "MIT"
+}
