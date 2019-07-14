@@ -31,6 +31,20 @@ To explore the schema locally in a web browser run `serverless offline` and open
 
 Distributed systems are hard.
 
+Ensuring atomic updates of both DynamoDB and S3 together would be much easier if GraphQL mutations were routed to the same long running process to linearize operations. Classic server architecture would use something like sticky sessions, while for scalibility mutations could be parallelized by sharding on the SHA-256 hash of the image.
+However, Amazon Lambda is event based and Lambdas can be started/stopped on any machine and events routed anywhere.
+
+The next best thing is a single DynamoDB streams Lambda function per partition that keeps changes to DynamoDB tables in sync with S3. And that's exactly what this system does using a S3-references table.
+
+Image and Collection tables only keep data about images.
+
+For keeping changes to Image data and S3 in sync, the S3-references table keeps track of:
+- image-data stored in S3 (the SHA-256 of it at least)
+- what Image items are referring to the same image-data
+
+Only when no Image items refer to a file on S3 can it be safely removed. This cleanup process is implemented as a DynamoDB streams handler to ensure it is [serializable](https://en.wikipedia.org/wiki/Serializability) and run at least once.
+
+
 
 ## Eventual consistency
 
@@ -122,6 +136,7 @@ This is my first ever project using:
 - GraphQL
 - Node.js
 - DynamoDB
+- DynamoDB Streams
 - AWS S3
 - AWS Lambda
 - AWS API Gateway
