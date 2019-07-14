@@ -36,26 +36,11 @@ Distributed systems are hard.
 
 - Image objects can only be added to a collection unordered once: Collections are a named set of images.
   Clients are responsible for sorting.
-- Writes (Create, Update, Delete) are logged in a CQRS style fashion to Amazon SLS first.
 - The DynamoDB table design favors read performance over writes, storing Collection membership in both Image and Collection items
+- Writes (Create, Update, Delete) are processed in DynamoDB streams handler and may eventually create or delete objects in S3
 - DynamoDB transactions are used to update both Image and Collection sets atomically
-
-
-### Read repair when requesting Image objects
-
-Because an Image object can be created before the upload to S3 has finished successfully, there is a possibility of image data being stored that are not yet or never will be available.
-
-To counter this, the GraphQL query checks each image has an `uploadedCompletedAt` property. Images that do not have these are repaired or scheduled for deletion.
-
-Repairing Image data works by:
-1. Checking S3 if the file exists.
-2. If it does, that means upload was successful but S3 failed to deliver an event or updating the DynamoDB Image item failed. Repair by updating the Image object with the missing `uploadedCompletedAt` timestamp.
-
-If the image does not exist on S3, it may have never completed uploading or is still being uploaded.
-1. Check that at least one hour has passed since Image creation
-2. If 1 hour has passed, the upload never completed. Delete the Image record from DynamoDB.
-   If less than an hour has passed, do nothing.
-3. Finally return null (no Image).
+  - Note: Transaction could be replaced by a Streams handler to save costs (DynamoDB Write Units)
+- DynamoDB transactions are used to change what blob an Image refers to (likely an uncommon operation)
 
 
 ### Image uploads
@@ -64,25 +49,12 @@ Images are added to S3 and the database in 2-phases:
 
 #### Phase 1, The GraphQL Lambda:
 
-The GraphQL mutation handler (or Command handler in CQRS):
-
-1. logs a `Created` event to SLS with the known SHA-256 hash of the image that will be uploaded to S3
-2. after successful logging, starts uploading to S3 if the SHA-256 key does not already exist
-3. after successful upload or if the key exists, logs an `UploadCompleted` event
-
-Step 3 is to allow garbage collection of Image data that references files which failed to upload to S3. It also helps auditing and debugging.
-
-Step 2 could be optimized by starting the upload in parallel immediately, while keeping the connection open and sending the last byte/chunk only when logging is successful. To prevent S3 committing a key and image-data on failure, we'd close the connection prematurely instead. This should work as the MD5 hash of the image is known and is passed to S3 as a data consistency check.
+Upload mutation handler T B D
 
 
-#### Phase 2, Event processing Lambda:
+#### Phase 2, The DynamoDB Streams handler:
 
-The event processing lambda is mainly responsible for updating DynamoDB.
-
-Commands related to uploading of images are processed as follows:
-- `Created` event is used to create a new DynamoDB Image item if it does not exist yet. (At least once processing)
-- `UploadCompleted` event updates the existing Image item for the reason described above in Phase 1
-- `Deleted` event checks that enough time since `UploadCompleted` has passed for S3 to update, updates any Collections referring to the image and removes the Image item.
+S3 sync, Modifications and Delete handler T B D
 
 
 ## Immutable image storage
