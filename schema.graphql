@@ -14,12 +14,12 @@ type Image {
   # Identifiers
   id: ID!
   sha256: URL_Safe_Base64_SHA256!
-  md5:  URL_Safe_Base64_MD5!
+  md5: URL_Safe_Base64_MD5!
   
   # Object metadata
   collections: [Collection!]
   createdAt: UTC_DateTime!
-  uploadedAt: UTC_DateTime!
+  uploadCompletedAt: UTC_DateTime!
   # blobAvailable: Boolean!
 
   # File metadata
@@ -37,6 +37,27 @@ type Collection {
   id: ID!
   name: String!
   images: [Image!]
+}
+
+type S3Reference {
+  # Identifiers
+  sha256: URL_Safe_Base64_SHA256!
+  id: ID!
+  md5: URL_Safe_Base64_MD5!
+
+  # Image references
+  images: [ID!]!
+
+  # Image metadata
+  size: Int!
+  mimetype: String!
+  width: Int
+  height: Int
+
+  # S3 reference
+  s3: URL!
+  uploadCompletedAt: UTC_DateTime!
+  lastFileName: String!
 }
 
 type Query {
