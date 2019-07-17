@@ -34,7 +34,7 @@ let s3 = new S3(IS_OFFLINE ? { endpoint: "localhost:8001" } : {});
 
 /// DynamoDB ops
 
-const object_to_updateItemInput = (tableName: string, key: Key, input: object) => {
+const object_to_updateItemInput = (tableName: string, key: Key, input: object): DynamoDB.UpdateItemInput => {
   var expr: string = null;
   let values = {};
   for (const keyName in input) {
@@ -51,16 +51,20 @@ const object_to_updateItemInput = (tableName: string, key: Key, input: object) =
   return { TableName: tableName, Key: key, UpdateExpression: expr, ExpressionAttributeValues: values }
 }
 
-function db_updateItem(tableName: string, key: Key, input: object) {
-  return dynamoDb.update(object_to_updateItemInput(tableName, key, input))
-}
-
 function db_deleteImageReferences(key: string) {
-  return dynamoDb.delete({ TableName: S3REFS_TABLE, Key: { "id": key } })
+  return dynamoDb.delete({ TableName: S3REFS_TABLE, Key: { "cuid": key } })
 }
 
-function db_updateImageItem(uuid: string, input: object) {
-  return db_updateItem(IMAGES_TABLE, { "id": { "S": uuid } }, input)
+/**
+ * Update the given Image attributes when it does not have the about to be saved SHA-256 assigned to it
+ * @param cuid Image ID
+ * @param input Image item attributes, requires sha256 and related properties at least
+ */
+function db_updateImageItem(cuid: string, input: object) {
+  // if ((input.sha256 || "").length != )
+  let params = object_to_updateItemInput(IMAGES_TABLE, { "cuid": { "S": cuid } }, input)
+  params.ConditionExpression = 'sha256 != :sha256'
+  return dynamoDb.update(params)
 }
 
 
@@ -80,16 +84,16 @@ function s3_deleteUnreferencedImage(sha256: string) {
   return s3.deleteObject({ Bucket: IMAGES_BUCKET, Key: sha256 }, null);
 }
 
-function s3_copyFromUploadBucket(uuid: string, md5: string, sha256: string) {
+function s3_copyFromUploadBucket(cuid: string, md5: string, sha256: string) {
   return s3.copyObject({
-    CopySource: UPLOAD_BUCKET + "/" + uuid, CopySourceIfMatch: md5,
+    CopySource: UPLOAD_BUCKET + "/" + cuid, CopySourceIfMatch: md5,
     Bucket: IMAGES_BUCKET,
     Key: sha256
   }, null)
 }
 
-function s3_deleteFromUploadBucket(uuid: string) {
-  return s3.deleteObject({ Bucket: UPLOAD_BUCKET, Key: uuid }, null)
+function s3_deleteFromUploadBucket(cuid: string) {
+  return s3.deleteObject({ Bucket: UPLOAD_BUCKET, Key: cuid }, null)
 }
 
 function s3_ignoreNoSuchKeyError(reason: AWSError) {
@@ -117,17 +121,17 @@ interface NewImageInput {
 type AWSResults = PromiseResult<object, AWSError>[]
 type AWSPromises = Promise<AWSResults>
 
-async function s3db_moveUploadAndCreateImageItem(uuid: string, newImage: NewImageInput): AWSPromises {
+async function s3db_moveUploadAndCreateImageItem(cuid: string, newImage: NewImageInput): AWSPromises {
   let results: AWSResults = [];
   let sha256 = newImage.sha256;
   let md5 = newImage.md5;
   // 1. Copy from upload to image bucket if not exists
-  let copyOp = s3_copyFromUploadBucket(uuid, md5, sha256).promise()
+  let copyOp = s3_copyFromUploadBucket(cuid, md5, sha256).promise()
   copyOp.catch(s3_ignoreNoSuchKeyError)
   await copyOp.then(r => results.push(r))
   // 2. Create or Update an Image DynamoDB item for this reference
   let mimetype = newImage.mimetype;
-  await db_updateImageItem(uuid, {
+  await db_updateImageItem(cuid, {
     sha256: sha256,
     md5: md5,
 
@@ -135,7 +139,7 @@ async function s3db_moveUploadAndCreateImageItem(uuid: string, newImage: NewImag
     uploadCompletedAt: newImage.uploadCompletedAt,
 
     "?name": newImage.name,
-    blob: s3_urlOf(uuid, mimetype),
+    blob: s3_urlOf(cuid, mimetype),
     size: newImage.size,
     mimetype: mimetype,
 
@@ -143,15 +147,15 @@ async function s3db_moveUploadAndCreateImageItem(uuid: string, newImage: NewImag
     height: newImage.height
   }).promise().then(r => results.push(r));
   // 3. Success! Clean up the S3 upload bucket
-  let deleteOp = s3_deleteFromUploadBucket(uuid).promise()
+  let deleteOp = s3_deleteFromUploadBucket(cuid).promise()
   deleteOp.catch(s3_ignoreNoSuchKeyError)
   return deleteOp.then(r => { results.push(r); return results })
 }
 
-function s3db_concurrentMoveUploadsAndCreateImageItems(uuids: string[], sha256: string, newImage: DynamoDBStreams.AttributeMap): AWSPromises {
+function s3db_concurrentMoveUploadsAndCreateImageItems(cuids: string[], sha256: string, newImage: DynamoDBStreams.AttributeMap): AWSPromises {
   let jobs: AWSPromises[] = [];
-  for (const uuid of uuids) {
-    jobs.push(s3db_moveUploadAndCreateImageItem(uuid, {
+  for (const cuid of cuids) {
+    jobs.push(s3db_moveUploadAndCreateImageItem(cuid, {
       sha256: sha256,
       md5: newImage.md5.S,
 

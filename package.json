@@ -13,6 +13,7 @@
     "graphql-depth-limit": "^1.1.0",
     "graphql-upload": "^8.0.7",
     "graphql-yoga": "^1.18.0",
+    "scuid": "^1.1.0",
     "source-map-support": "^0.5.10",
     "urlsafe-base64": "^1.0.0",
     "utf-8-validate": "^5.0.2"

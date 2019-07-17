@@ -10,7 +10,9 @@ plugins:
   - serverless-offline
 
 custom:
-  tableName: 'imgrph-${self:provider.stage}'
+  S3RefsTableName: 'S3Refs-${self:provider.stage}'
+  ImagesTableName: 'Images-${self:provider.stage}'
+  CollectionsTableName: 'Collections-${self:provider.stage}'
   dynamodb:
     stages:
       - dev
@@ -32,9 +34,11 @@ provider:
         - dynamodb:UpdateItem
         - dynamodb:DeleteItem
       Resource:
+        - { "Fn::GetAtt": ["S3RefsDynamoDBTable", "Arn" ] }
         - { "Fn::GetAtt": ["ImagesDynamoDBTable", "Arn" ] }
+        - { "Fn::GetAtt": ["CollectionsDynamoDBTable", "Arn" ] }
   environment:
-    IMAGES_TABLE: ${self:custom.tableName}
+    IMAGES_TABLE: ${self:custom.ImagesTableName}
 
 functions:
   graphql:
@@ -54,18 +58,114 @@ functions:
 
 resources:
   Resources:
-    ImageDynamoDBTable:
+    S3RefsDynamoDBTable:
       Type: 'AWS::DynamoDB::Table'
       Properties:
         AttributeDefinitions:
           -
-            AttributeName: id
+            AttributeName: sha256
+            AttributeType: S
+          -
+            AttributeName: md5
+            AttributeType: S
+          -
+            AttributeName: images
+            AttributeType: SS
+          -
+            AttributeName: size
+            AttributeType: N
+          -
+            AttributeName: mimetype
+            AttributeType: S
+          -
+            AttributeName: width
+            AttributeType: N
+          -
+            AttributeName: height
+            AttributeType: N
+          -
+            AttributeName: uploadCompletedAt
+            AttributeType: S
+          -
+            AttributeName: lastFileName
             AttributeType: S
         KeySchema:
           -
-            AttributeName: id
+            AttributeName: sha256
             KeyType: HASH
         ProvisionedThroughput:
           ReadCapacityUnits: 1
           WriteCapacityUnits: 1
-        TableName: ${self:custom.tableName}
+        TableName: ${self:custom.S3RefsTableName}
+    ImagesDynamoDBTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: cuid
+            AttributeType: S
+          -
+            AttributeName: sha256
+            AttributeType: S
+          -
+            AttributeName: md5
+            AttributeType: S
+          -
+            AttributeName: collections
+            AttributeType: SS
+          -
+            AttributeName: createdAt
+            AttributeType: S
+          -
+            AttributeName: uploadCompletedAt
+            AttributeType: S
+          -
+            AttributeName: name
+            AttributeType: S
+          -
+            AttributeName: size
+            AttributeType: N
+          -
+            AttributeName: mimetype
+            AttributeType: S
+          -
+            AttributeName: width
+            AttributeType: N
+          -
+            AttributeName: height
+            AttributeType: N
+        KeySchema:
+          -
+            AttributeName: cuid
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:custom.ImagesTableName}
+    CollectionsDynamoDBTable:
+      Type: 'AWS::DynamoDB::Table'
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: cuid
+            AttributeType: S
+          -
+            AttributeName: name
+            AttributeType: S
+          -
+            AttributeName: createdAt
+            AttributeType: S
+          -
+            AttributeName: lastModifiedAt
+            AttributeType: S
+          -
+            AttributeName: images
+            AttributeType: SS
+        KeySchema:
+          -
+            AttributeName: cuid
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:custom.CollectionsTableName}

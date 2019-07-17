@@ -4,15 +4,35 @@ scalar URL_Safe_Base64_SHA256
 scalar URL_Safe_Base64_MD5
 
 # Basic types
+scalar CUID #See: https://usecuid.org
 scalar URL
 scalar UTC_DateTime
 
 # TODO: Service must limit nesting of Image Collection Image queries
 # https://www.prisma.io/forum/t/question-about-malicious-queries-with-infinite-depth-nested-relations/2628
 
+type S3Reference {
+  # Identifiers
+  sha256: URL_Safe_Base64_SHA256!
+  md5: URL_Safe_Base64_MD5!
+
+  # Image references
+  images: [CUID!]!
+
+  # Image metadata
+  size: Int!
+  mimetype: String!
+  width: Int
+  height: Int
+
+  # S3 temp bucket upload data
+  uploadCompletedAt: UTC_DateTime!
+  lastFileName: String!
+}
+
 type Image {
   # Identifiers
-  id: ID!
+  cuid: CUID!
   sha256: URL_Safe_Base64_SHA256!
   md5: URL_Safe_Base64_MD5!
   
@@ -20,11 +40,10 @@ type Image {
   collections: [Collection!]
   createdAt: UTC_DateTime!
   uploadCompletedAt: UTC_DateTime!
-  # blobAvailable: Boolean!
 
   # File metadata
   name: String
-  blob: URL! # Not actually stored in DynamoDB as it can be constructed from `name` and `size`
+  blob: URL! # Not actually stored in DynamoDB as it can be constructed from `name` and `mimetype`
   size: Int!
   mimetype: String!
   
@@ -34,30 +53,11 @@ type Image {
 }
 
 type Collection {
-  id: ID!
+  cuid: CUID!
   name: String!
+  createdAt: UTC_DateTime!
+  lastModifiedAt: UTC_DateTime!
   images: [Image!]
-}
-
-type S3Reference {
-  # Identifiers
-  sha256: URL_Safe_Base64_SHA256!
-  id: ID!
-  md5: URL_Safe_Base64_MD5!
-
-  # Image references
-  images: [ID!]!
-
-  # Image metadata
-  size: Int!
-  mimetype: String!
-  width: Int
-  height: Int
-
-  # S3 reference
-  s3: URL!
-  uploadCompletedAt: UTC_DateTime!
-  lastFileName: String!
 }
 
 type Query {
