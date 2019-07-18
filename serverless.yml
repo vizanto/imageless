@@ -65,30 +65,6 @@ resources:
           -
             AttributeName: sha256
             AttributeType: S
-          -
-            AttributeName: md5
-            AttributeType: S
-          -
-            AttributeName: images
-            AttributeType: SS
-          -
-            AttributeName: size
-            AttributeType: N
-          -
-            AttributeName: mimetype
-            AttributeType: S
-          -
-            AttributeName: width
-            AttributeType: N
-          -
-            AttributeName: height
-            AttributeType: N
-          -
-            AttributeName: uploadCompletedAt
-            AttributeType: S
-          -
-            AttributeName: lastFileName
-            AttributeType: S
         KeySchema:
           -
             AttributeName: sha256
@@ -104,36 +80,6 @@ resources:
           -
             AttributeName: cuid
             AttributeType: S
-          -
-            AttributeName: sha256
-            AttributeType: S
-          -
-            AttributeName: md5
-            AttributeType: S
-          -
-            AttributeName: collections
-            AttributeType: SS
-          -
-            AttributeName: createdAt
-            AttributeType: S
-          -
-            AttributeName: uploadCompletedAt
-            AttributeType: S
-          -
-            AttributeName: name
-            AttributeType: S
-          -
-            AttributeName: size
-            AttributeType: N
-          -
-            AttributeName: mimetype
-            AttributeType: S
-          -
-            AttributeName: width
-            AttributeType: N
-          -
-            AttributeName: height
-            AttributeType: N
         KeySchema:
           -
             AttributeName: cuid
@@ -149,18 +95,6 @@ resources:
           -
             AttributeName: cuid
             AttributeType: S
-          -
-            AttributeName: name
-            AttributeType: S
-          -
-            AttributeName: createdAt
-            AttributeType: S
-          -
-            AttributeName: lastModifiedAt
-            AttributeType: S
-          -
-            AttributeName: images
-            AttributeType: SS
         KeySchema:
           -
             AttributeName: cuid
