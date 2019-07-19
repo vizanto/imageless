@@ -1,27 +1,22 @@
 import { S3, DynamoDBStreams, DynamoDB, AWSError } from "aws-sdk";
 import { Key } from "aws-sdk/clients/dynamodb";
 import { PromiseResult } from "aws-sdk/lib/request";
-
-const IS_OFFLINE = process.env.IS_OFFLINE === 'true';
+import { Body } from "aws-sdk/clients/s3";
+import { createHash, Hash } from "crypto";
+import base64url from "base64url";
+import { Readable } from "stream";
+import * as streamMeter from "stream-meter";
+var scuid: () => string = require('scuid');
 
 /// --------------
-/// DynamoDB setup
+/// DynamoDB and S3 configuration
 const S3REFS_TABLE = process.env.S3REFS_TABLE;
 const IMAGES_TABLE = process.env.IMAGES_TABLE;
-console.log(IMAGES_TABLE)
-
-let dynamoDb = new DynamoDB.DocumentClient(IS_OFFLINE ? {
-  region: 'localhost',
-  endpoint: 'http://localhost:8000'
-} : {})
-
-/// --------------
-/// S3 setup
+const COLLECTIONS_TABLE = process.env.COLLECTIONS_TABLE;
 const UPLOAD_BUCKET = 'upload'
 const IMAGES_BUCKET = 'images'
-
-let s3 = new S3(IS_OFFLINE ? { endpoint: "localhost:8001" } : {});
 /// --------------
+
 
 // Image metadata byte-stream handler
 
@@ -235,9 +230,155 @@ function handleS3ReferenceTableEventBatch(eventsBatch: DynamoDBStreams.Record[])
       const next = events[i];
       lastPromise = lastPromise == null ? handleS3ReferenceTableEvent(next) : lastPromise.then(() => handleS3ReferenceTableEvent(next))
     }
-    if (!lastPromise) throw 'error'
+    if (!lastPromise) throw new Error('impossible: zero executed jobs')
     jobs.push(lastPromise)
   }
   //3. Flatten results on completion
   return Promise.all(jobs).then(job => job.reduce((result, array) => result.concat(array), []))
 }
+
+type CUID = string
+type URL_Safe_Base64_SHA256 = string
+type URL_Safe_Base64_MD5 = string
+type UTC_DateTime = string
+
+interface S3ReferenceItem {
+  sha256?: URL_Safe_Base64_SHA256;
+  md5?: Base64_MD5;
+
+  images: CUID[];
+
+  size: number;
+  mimetype: string;
+  width: number;
+  height: number;
+
+  uploadCompletedAt: UTC_DateTime;
+  lastFileName: String;
+}
+
+interface ImageItem {
+  cuid: CUID;
+  sha256: URL_Safe_Base64_SHA256;
+  md5: URL_Safe_Base64_MD5;
+
+  collections?: CUID[];
+  createdAt: UTC_DateTime;
+  uploadCompletedAt: UTC_DateTime;
+
+  name: string;
+  // blob?: URL; // Not actually stored in DynamoDB as it can be constructed from`name` and`mimetype`
+  size: number;
+  mimetype: string;
+
+  width: number;
+  height: number;
+}
+
+interface CollectionItem {
+  cuid: CUID;
+  name: string;
+  images: CUID[];
+}
+
+function readableBody(body: Body) : Readable {
+  let blob: Readable;
+  if (body instanceof Readable) {
+    blob = body
+  } else {
+    blob = new Readable()
+    blob.push(body)
+    blob.push(null)
+  }
+  return blob
+}
+
+function pipePromise<D extends NodeJS.WritableStream, T>(blob: Readable, destination: D, onEnd: (destination: D) => T): Promise<T> {
+  blob.pipe(destination)
+  return new Promise<T>((resolve, reject) => {
+    blob.on('error', reject)
+    blob.on('end', () => resolve(onEnd(destination)))
+  });
+}
+
+export class ImageRepository {
+  readonly s3: S3;
+  readonly dynamoDb: DynamoDB.DocumentClient;
+  readonly imageSizeLimit: number;
+
+  constructor(dynamoDb: DynamoDB.DocumentClient, s3: S3, maxImageSizeInBytes?: number) {
+    this.dynamoDb = dynamoDb;
+    this.s3 = s3;
+    this.imageSizeLimit = maxImageSizeInBytes || /* 50MB */50 * 1024 * 1024;
+  }
+
+  async createFrom(body: Body, name: string): Promise<ImageItem> {
+    const id = scuid()
+    let readable = readableBody(body)
+    let meter = streamMeter(this.imageSizeLimit)
+    // Stream into counting and hashing functions while uploading to S3
+    let bytesCounter = pipePromise(readable, meter,                m => m.bytes)
+    let digestSHA256 = pipePromise(readable, createHash('SHA256'), h => h.digest())
+    let digestMD5    = pipePromise(readable, createHash('MD5'),    h => h.digest())
+
+    //1. Copy body to temporary upload bucket, while calculating SHA-256 and metadata
+    let params: S3.PutObjectRequest = {
+      Bucket: UPLOAD_BUCKET,
+      Key: id,
+      Body: body
+    }
+    let uploadResult = await this.s3.putObject(params, undefined).promise()
+
+    //2. Check the upload was successful
+    let size = await bytesCounter //TODO: test what happens when size limit was reached during upload
+    let md5bits = await digestMD5
+    let md5 = md5bits.toString("base64")
+    if (md5 != uploadResult.ETag && !uploadResult.ServerSideEncryption) {
+      // S3 will return the MD5 hash in certain cases, e.g. no server-side encryption and size below 5GB
+      // See docs for details: https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPUT.html
+      throw new Error("Body corrupted during transfer. Expected MD5: " + md5 + ", but S3 got: " + uploadResult.ETag);
+    }
+    //3. Add a record to reference table to ensure the upload gets moved to images bucket eventually
+    let sha256bits = await digestSHA256
+    let sha256 = base64url.encode(sha256bits)
+    let imageRef: S3ReferenceItem = {
+      sha256: sha256,
+      md5: md5,
+      images: [id], //fixme: needs a set-type add !
+      size: size,
+      mimetype: mimetype,
+      width: width,
+      height: height,
+      uploadCompletedAt: new Date().toUTCString(),
+      lastFileName: name
+    };
+    await this.dynamoDb.put({ TableName: S3REFS_TABLE, Item: imageRef })
+
+    //4. Don't just wait for DynamoDB Streams handler, start the upload to permanent copy process immediately!
+    // let image: ImageItem = {
+    //   cuid: id,
+    //   sha256: sha256,
+    //   md5: md5,
+    //   name: name,
+    //   createdAt: new Date().toUTCString(),
+    // };
+    // let imageParams = object_to_updateItemInput(IMAGES_TABLE, { "cuid": { "S": id } }, image)
+    // await this.dynamoDb.update(imageRefParams)
+    // return image;
+  }
+}
+
+export const IS_OFFLINE = process.env.IS_OFFLINE === 'true';
+
+/// ------------------------
+/// Default Image Repository
+export const images = new ImageRepository(
+  new DynamoDB.DocumentClient(
+    IS_OFFLINE ? {
+      region: 'localhost',
+      endpoint: 'http://localhost:8000'
+    } : {}),
+  new S3(IS_OFFLINE ? { endpoint: "localhost:8001" } : {})
+);
+
+console.log(COLLECTIONS_TABLE); // Make TypeScript shut up about unused reference for now

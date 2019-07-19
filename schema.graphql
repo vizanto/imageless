@@ -1,7 +1,7 @@
-# Cryptographic hashes encoded using: https://github.com/RGBboy/urlsafe-base64
+# Cryptographic hashes encoded according to: https://en.wikipedia.org/wiki/Base64#RFC_4648
 # TODO: parsing and validation: https://github.com/prisma/graphql-yoga/issues/229
 scalar URL_Safe_Base64_SHA256
-scalar URL_Safe_Base64_MD5
+scalar Base64_MD5
 
 # Basic types
 scalar CUID #See: https://usecuid.org
