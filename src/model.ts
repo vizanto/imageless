@@ -76,8 +76,9 @@ const mimetypeFileExtension = {
   "image/gif": "gif"
 }
 
-function s3_urlOf(sha256: string, mimetype: string) {
-  return "s3://images/" + sha256 + "." + (mimetypeFileExtension[mimetype] || "")
+const s3_urlOf = (sha256: string, mimetype: string) => {
+  const url = s3.config.endpoint + '/' + IMAGES_BUCKET + '/' + sha256 + '.' + (mimetypeFileExtension[mimetype] || '')
+  return url
 }
 
 function s3_deleteUnreferencedImage(sha256: string) {
