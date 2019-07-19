@@ -2,34 +2,128 @@ import { S3, DynamoDBStreams, DynamoDB, AWSError } from "aws-sdk";
 import { Key } from "aws-sdk/clients/dynamodb";
 import { PromiseResult } from "aws-sdk/lib/request";
 import { Body } from "aws-sdk/clients/s3";
-import { createHash, Hash } from "crypto";
+import { createHash } from "crypto";
 import base64url from "base64url";
 import { Readable } from "stream";
 import * as streamMeter from "stream-meter";
 var scuid: () => string = require('scuid');
 
-/// --------------
-/// DynamoDB and S3 configuration
-const S3REFS_TABLE = process.env.S3REFS_TABLE;
-const IMAGES_TABLE = process.env.IMAGES_TABLE;
-const COLLECTIONS_TABLE = process.env.COLLECTIONS_TABLE;
-const UPLOAD_BUCKET = 'upload'
-const IMAGES_BUCKET = 'images'
-/// --------------
+/// ----------
+/// Data Types
+
+type CUID = string
+type URL_Safe_Base64_SHA256 = string
+type Base64_MD5 = string
+
+export const mimetypeFileExtension = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif"
+}
+
+export interface ImageBlobData {
+  sha256: URL_Safe_Base64_SHA256
+  md5: Base64_MD5
+  uploadCompletedAt: Date
+  size: number
+  mimetype: string
+  width: number
+  height: number
+}
+export interface S3ReferenceItem extends ImageBlobData {
+  images: CUID[];
+  lastFileName: string;
+}
+export interface ImageInput extends ImageBlobData {
+  name: string
+}
+export interface Image extends ImageBlobData {
+  cuid: CUID
+  createdAt: Date
+  collections?: CUID[]
+  name: string
+}
+export interface CollectionItem {
+  cuid: CUID;
+  name: string;
+  images: CUID[];
+}
 
 
-// Image metadata byte-stream handler
+/// ------
+/// S3 ops
+
+function s3_ignoreNoSuchKeyError(reason: AWSError) {
+  if ("NoSuchKey" != reason.code) throw reason;
+  else console.log("Ignored AWSError", reason);
+}
+
+export class S3ImageRepositoryBuckets {
+  private s3: S3;
+  readonly uploadBucket: string;
+  readonly imagesBucket: string;
+
+  constructor(s3: S3, imagesBucketName?: string, uploadBucketName?: string) {
+    this.s3 = s3;
+    this.uploadBucket = uploadBucketName || 'upload';
+    this.imagesBucket = imagesBucketName || 'images';
+  }
+
+  urlOf(sha256: string, mimetype: string) {
+    const url = this.s3.config.endpoint + '/' + this.imagesBucket + '/' + sha256 + '.' + (mimetypeFileExtension[mimetype] || '')
+    console.log('S3 URL', url);
+    return url
+  }
+
+  putUpload(id: CUID, body: Body) {
+    let params: S3.PutObjectRequest = {
+      Bucket: this.uploadBucket,
+      Key: id,
+      Body: body
+    }
+    return this.s3.putObject(params, undefined);
+  }
+
+  copyFromUploadBucket(cuid: string, eTag: string, sha256: string) {
+    return this.s3.copyObject({
+      CopySource: this.uploadBucket + "/" + cuid,
+      CopySourceIfMatch: eTag,
+      Bucket: this.imagesBucket,
+      Key: sha256
+    }, null)
+  }
+
+  async moveUploadToImageBucket<T>(cuid: string, eTag: string, sha256: URL_Safe_Base64_SHA256, onCopyCompleted: () => Promise<T>) {
+    // 1. Copy from upload to image bucket if not exists
+    let copyOp = this.copyFromUploadBucket(cuid, eTag, sha256).promise();
+    copyOp.catch(s3_ignoreNoSuchKeyError)
+    let copyResult = await copyOp;
+    // 2. Notify caller copy was completed, usually to Create or Update an Image DynamoDB item for this upload
+    let handlerResult = await onCopyCompleted();
+    // 3. Success! Clean up the S3 upload bucket
+    let deleteOp = this.deleteFromUploadBucket(cuid).promise();
+    deleteOp.catch(s3_ignoreNoSuchKeyError)
+    let deleteResult = await deleteOp;
+    return {
+      awsResults: { s3Copy: copyResult, s3Delete: deleteResult },
+      afterCopyCompleted: handlerResult
+    }
+  }
+
+  deleteFromUploadBucket(cuid: string) {
+    return this.s3.deleteObject({ Bucket: this.uploadBucket, Key: cuid }, null)
+  }
+
+  deleteUnreferencedImage(sha256: string) {
+    return this.s3.deleteObject({ Bucket: this.imagesBucket, Key: sha256 }, null);
+  }
+}
 
 
-/// DynamoDB handlers
+/// ---------------
+/// DynamoDB Tables
 
-// function addImageReference(image: Image) {
-
-// }
-
-/// DynamoDB ops
-
-const object_to_updateItemInput = (tableName: string, key: Key, input: object): DynamoDB.UpdateItemInput => {
+export const object_to_updateItemInput = (tableName: string, key: Key, input: object): DynamoDB.UpdateItemInput => {
   var expr: string = null;
   let values = {};
   for (const keyName in input) {
@@ -46,242 +140,187 @@ const object_to_updateItemInput = (tableName: string, key: Key, input: object): 
   return { TableName: tableName, Key: key, UpdateExpression: expr, ExpressionAttributeValues: values }
 }
 
-function db_deleteImageReferences(key: string) {
-  return dynamoDb.delete({ TableName: S3REFS_TABLE, Key: { "cuid": key } })
+const { S3REFS_TABLE, IMAGES_TABLE, COLLECTIONS_TABLE } = process.env;
+
+export class DynamoDBImageRepositoryTables {
+  readonly db: DynamoDB.DocumentClient;
+
+  constructor(dynamoDb: DynamoDB.DocumentClient) {
+    this.db = dynamoDb;
+  }
+
+  addReference(imageRef: S3ReferenceItem) {
+    //TODO: INSERT OR UPDATE, SET ADD
+    //fixme: needs a set-type add !
+    return this.db.put({ TableName: S3REFS_TABLE, Item: imageRef })
+  }
+
+  deleteReferences(key: string) {
+    return this.db.delete({ TableName: S3REFS_TABLE, Key: { "cuid": key } })
+  }
+
+  /**
+   * Creates a new Image item,
+   *  or if it exists but has a different SHA-256 assigned to it: replaces its ImageBlobData attributes.
+   *
+   * Does nothing if an Image with given CUID and SHA-256 already exists.
+   *
+   * @param cuid Image ID
+   * @param input Image item attributes, requires sha256 and all S3-object related properties
+   */
+  createImage(cuid: string, newImage: Readonly<ImageInput>, creationTimestamp: Date | "now") {
+    let { uploadCompletedAt } = newImage;
+    let createdAt = (creationTimestamp == "now" ? new Date() : creationTimestamp)
+    let input = Object.freeze({
+      ...newImage,
+      "?createdAt": createdAt.toUTCString(),
+      uploadCompletedAt: uploadCompletedAt.toUTCString(),
+    });
+    let params = object_to_updateItemInput(IMAGES_TABLE, { "cuid": { "S": cuid } }, input);
+    params.ConditionExpression = 'sha256 != :sha256'
+    // Construct an Image object from the database input, excluding ?createdAt
+    // See also: https://stackoverflow.com/questions/34698905/clone-a-js-object-except-for-one-key
+    const image: Image = (({ '?createdAt': string, ...imageData }) => ({
+      ...imageData,
+      cuid: cuid,
+      createdAt: createdAt,
+      uploadCompletedAt: uploadCompletedAt,
+    }))(input);
+    return { image: Object.freeze(image), dbParams: params, dbUpdateResult: this.db.update(params) };
+  }
+}
+
+
+/// ------------------------
+/// DynamoDB Stream handlers
+
+type AWSResult<T extends object> = PromiseResult<T, AWSError>
+type AWSResults = AWSResult<object>[]
+type AWSPromises = Promise<AWSResults>
+
+interface AWSCompositeOp {
+  awsResults: { [key: string]: AWSResult<object> }
 }
 
 /**
- * Update the given Image attributes when it does not have the about to be saved SHA-256 assigned to it
- * @param cuid Image ID
- * @param input Image item attributes, requires sha256 and related properties at least
+ * Methods to keep S3 buckets and S3Reference Table in sync
  */
-function db_updateImageItem(cuid: string, input: object) {
-  // if ((input.sha256 || "").length != )
-  let params = object_to_updateItemInput(IMAGES_TABLE, { "cuid": { "S": cuid } }, input)
-  params.ConditionExpression = 'sha256 != :sha256'
-  return dynamoDb.update(params)
-}
+export class ImageRepository_DynamoDB_StreamHandler {
+  readonly s3: S3ImageRepositoryBuckets;
+  readonly db: DynamoDBImageRepositoryTables;
 
-
-/// S3 ops
-
-const mimetypeFileExtension = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif"
-}
-
-const s3_urlOf = (sha256: string, mimetype: string) => {
-  const url = s3.config.endpoint + '/' + IMAGES_BUCKET + '/' + sha256 + '.' + (mimetypeFileExtension[mimetype] || '')
-  return url
-}
-
-function s3_deleteUnreferencedImage(sha256: string) {
-  return s3.deleteObject({ Bucket: IMAGES_BUCKET, Key: sha256 }, null);
-}
-
-function s3_copyFromUploadBucket(cuid: string, md5: string, sha256: string) {
-  return s3.copyObject({
-    CopySource: UPLOAD_BUCKET + "/" + cuid, CopySourceIfMatch: md5,
-    Bucket: IMAGES_BUCKET,
-    Key: sha256
-  }, null)
-}
-
-function s3_deleteFromUploadBucket(cuid: string) {
-  return s3.deleteObject({ Bucket: UPLOAD_BUCKET, Key: cuid }, null)
-}
-
-function s3_ignoreNoSuchKeyError(reason: AWSError) {
-  if ("NoSuchKey" != reason.code) throw reason;
-  else console.log("Ignored AWSError", reason);
-}
-
-
-/// DynamoDB Stream handlers
-
-interface NewImageInput {
-  sha256: string,
-  md5: string,
-
-  uploadCompletedAt: Date,
-
-  name: string,
-  size: number,
-  mimetype: string,
-
-  width: number,
-  height: number
-}
-
-type AWSResults = PromiseResult<object, AWSError>[]
-type AWSPromises = Promise<AWSResults>
-
-async function s3db_moveUploadAndCreateImageItem(cuid: string, newImage: NewImageInput): AWSPromises {
-  let results: AWSResults = [];
-  let sha256 = newImage.sha256;
-  let md5 = newImage.md5;
-  // 1. Copy from upload to image bucket if not exists
-  let copyOp = s3_copyFromUploadBucket(cuid, md5, sha256).promise()
-  copyOp.catch(s3_ignoreNoSuchKeyError)
-  await copyOp.then(r => results.push(r))
-  // 2. Create or Update an Image DynamoDB item for this reference
-  let mimetype = newImage.mimetype;
-  await db_updateImageItem(cuid, {
-    sha256: sha256,
-    md5: md5,
-
-    createdAt: new Date(),
-    uploadCompletedAt: newImage.uploadCompletedAt,
-
-    "?name": newImage.name,
-    blob: s3_urlOf(cuid, mimetype),
-    size: newImage.size,
-    mimetype: mimetype,
-
-    width: newImage.width,
-    height: newImage.height
-  }).promise().then(r => results.push(r));
-  // 3. Success! Clean up the S3 upload bucket
-  let deleteOp = s3_deleteFromUploadBucket(cuid).promise()
-  deleteOp.catch(s3_ignoreNoSuchKeyError)
-  return deleteOp.then(r => { results.push(r); return results })
-}
-
-function s3db_concurrentMoveUploadsAndCreateImageItems(cuids: string[], sha256: string, newImage: DynamoDBStreams.AttributeMap): AWSPromises {
-  let jobs: AWSPromises[] = [];
-  for (const cuid of cuids) {
-    jobs.push(s3db_moveUploadAndCreateImageItem(cuid, {
-      sha256: sha256,
-      md5: newImage.md5.S,
-
-      uploadCompletedAt: new Date(newImage.uploadCompletedAt.S),
-
-      name: newImage.lastFileName.S,
-      size: parseInt(newImage.size.N),
-      mimetype: newImage.mimetype.S,
-
-      width: parseInt(newImage.width.N),
-      height: parseInt(newImage.height.N)
-    }));
-  }
-  const result = Promise.all(jobs).then(job => job.reduce((result, array) => result.concat(array), []))
-  return result
-}
-
-function handleS3ReferenceTableEvent(event: DynamoDBStreams.Record): AWSPromises {
-  let record = event.dynamodb;
-  let sha256 = record.Keys.sha256.S;
-  let newImage = record.NewImage;
-
-  switch (event.eventName) {
-    case "INSERT":
-      // Copy from upload bucket to images bucket when entirely new references are added.
-      // This is to ensure completed uploads are eventually moved to the Image bucket and
-      //  corresponding Image items created in DynamoDB.
-      // If the upload mutation handler completed successfully, this should end up doing nothing.
-      return s3db_concurrentMoveUploadsAndCreateImageItems(newImage.images.SS, sha256, newImage)
-    case "REMOVE":
-      // Delete from S3 when all references to an S3-object are removed from DynamoDB
-      let deleteOp = s3_deleteUnreferencedImage(sha256).promise()
-      deleteOp.catch(s3_ignoreNoSuchKeyError)
-      return deleteOp.then(r => [r])
-    case "MODIFY":
-      // Synchronize changes to S3-references items with actual S3 storage
-      // Clearing the set of references will trigger a delete from S3 and item delete from 
-      let oldImageRef = record.OldImage.images.SS;
-      let newImageRef = newImage.images.SS;
-      //-- Check for reference count changes
-      // A. Empty set, no more references to S3. Delete the blob!
-      if (newImageRef.length == 0) {
-        return db_deleteImageReferences(sha256).promise().then(r => [r])
-        // The "REMOVE" event handler will clean up S3
-      }
-      // B. Set has grown, copy the uploaded file to long-term S3 bucket
-      else if (newImageRef.length > oldImageRef.length) {
-        let newRefs = newImageRef.filter(v => oldImageRef.indexOf(v) == -1)
-        return s3db_concurrentMoveUploadsAndCreateImageItems(newRefs, sha256, newImage)
-      }
+  constructor(s3: S3ImageRepositoryBuckets, db: DynamoDBImageRepositoryTables) {
+    this.s3 = s3;
+    this.db = db;
   }
 
-  //-- Ignore all other modifications
-  return Promise.resolve([])
-}
-
-function handleS3ReferenceTableEventBatch(eventsBatch: DynamoDBStreams.Record[]): AWSPromises {
-  //1. Group all events by SHA-256 primary key in event order
-  let groupedEvents = new Map<string, DynamoDBStreams.Record[]>()
-  for (let i = 0; i < eventsBatch.length; i++) {
-    const event = eventsBatch[i];
-    const dynamoDb = event.dynamodb
-    const key = dynamoDb.Keys.sha256.S
-    const recordGroup = groupedEvents.get(key)
-    if (!recordGroup) {
-      groupedEvents.set(key, [event])
-    } else {
-      recordGroup.push(event)
+  async _moveUploadAndCreateImageItem(cuid: string, newImage: ImageInput) {
+    // Prepare to Create (or Update) an Image DynamoDB item using the S3-reference
+    let createImage = () => this.db.createImage(cuid, newImage, "now").dbUpdateResult.promise();
+    // Move the S3 object from upload to image bucket
+    let moveOp = await this.s3.moveUploadToImageBucket(cuid, newImage.md5, newImage.sha256, createImage);
+    // Success!
+    return {
+      awsResults: { ...moveOp.awsResults, dbUpdate: moveOp.afterCopyCompleted },
+      image: null
     }
   }
-  //2. Handle all events in parallel that have the same primary key
-  let jobs: AWSPromises[] = [];
-  for (const events of groupedEvents.values()) {
-    var lastPromise: AWSPromises;
-    for (let i = 0; i < events.length; i++) {
-      const next = events[i];
-      lastPromise = lastPromise == null ? handleS3ReferenceTableEvent(next) : lastPromise.then(() => handleS3ReferenceTableEvent(next))
+
+  async _concurrentMoveUploadsAndCreateImageItems(cuids: string[], sha256: string, newImage: DynamoDBStreams.AttributeMap): AWSPromises {
+    let jobs: Promise<AWSCompositeOp>[] = [];
+    for (const cuid of cuids) {
+      jobs.push(this._moveUploadAndCreateImageItem(cuid, {
+        sha256: sha256,
+        md5: newImage.md5.S,
+        uploadCompletedAt: new Date(newImage.uploadCompletedAt.S),
+
+        name: newImage.lastFileName.S,
+        size: parseInt(newImage.size.N),
+        mimetype: newImage.mimetype.S,
+
+        width: parseInt(newImage.width.N),
+        height: parseInt(newImage.height.N)
+      }));
     }
-    if (!lastPromise) throw new Error('impossible: zero executed jobs')
-    jobs.push(lastPromise)
+    return Promise.all(jobs)
+      .then(job => job.reduce((array: AWSResults, result) => array.concat(Object.values(result.awsResults)), []))
   }
-  //3. Flatten results on completion
-  return Promise.all(jobs).then(job => job.reduce((result, array) => result.concat(array), []))
+
+  async _handleS3ReferenceTableEvent(event: DynamoDBStreams.Record): AWSPromises {
+    let record = event.dynamodb;
+    let sha256 = record.Keys.sha256.S;
+    let newImage = record.NewImage;
+
+    switch (event.eventName) {
+      case "INSERT":
+        // Copy from upload bucket to images bucket when entirely new references are added.
+        // This is to ensure completed uploads are eventually moved to the Image bucket and
+        //  corresponding Image items created in DynamoDB.
+        // If the upload mutation handler completed successfully, this should end up doing nothing.
+        return this._concurrentMoveUploadsAndCreateImageItems(newImage.images.SS, sha256, newImage)
+      case "REMOVE":
+        // Delete from S3 when all references to an S3-object are removed from DynamoDB
+        let deleteOp = s3.deleteUnreferencedImage(sha256).promise()
+        deleteOp.catch(s3_ignoreNoSuchKeyError)
+        return deleteOp.then(r => [r])
+      case "MODIFY":
+        // Synchronize changes to S3-references items with actual S3 storage
+        // Clearing the set of references will trigger a delete from S3 and item delete from
+        let oldImageRef = record.OldImage.images.SS;
+        let newImageRef = newImage.images.SS;
+        //-- Check for reference count changes
+        // A. Empty set, no more references to S3. Delete the blob!
+        if (newImageRef.length == 0) {
+          return this.db.deleteReferences(sha256).promise().then(r => [r])
+          // The "REMOVE" event handler will clean up S3
+        }
+        // B. Set has grown, copy the uploaded file to long-term S3 bucket
+        else if (newImageRef.length > oldImageRef.length) {
+          let newRefs = newImageRef.filter(v => oldImageRef.indexOf(v) == -1)
+          return this._concurrentMoveUploadsAndCreateImageItems(newRefs, sha256, newImage)
+        }
+    }
+
+    //-- Ignore all other modifications
+    return Promise.resolve([])
+  }
+
+  async handleS3ReferenceTableEventBatch(eventsBatch: DynamoDBStreams.Record[]): AWSPromises {
+    //1. Group all events by SHA-256 primary key in event order
+    let groupedEvents = new Map<string, DynamoDBStreams.Record[]>()
+    for (let i = 0; i < eventsBatch.length; i++) {
+      const event = eventsBatch[i];
+      const dynamoDb = event.dynamodb
+      const key = dynamoDb.Keys.sha256.S
+      const recordGroup = groupedEvents.get(key)
+      if (!recordGroup) {
+        groupedEvents.set(key, [event])
+      } else {
+        recordGroup.push(event)
+      }
+    }
+    //2. Handle all events in parallel that have the same primary key
+    let jobs: AWSPromises[] = [];
+    for (const events of groupedEvents.values()) {
+      if (!events[0]) throw new Error('impossible: zero events in group');
+      var lastPromise: AWSPromises = this._handleS3ReferenceTableEvent(events[0]);
+      for (let i = 1; i < events.length; i++) {
+        const next = events[i];
+        lastPromise = lastPromise.then(() => this._handleS3ReferenceTableEvent(next));
+      }
+      jobs.push(lastPromise)
+    }
+    //3. Flatten results on completion
+    const job = await Promise.all(jobs);
+    return job.reduce((result, array) => result.concat(array), []);
+  }
 }
 
-type CUID = string
-type URL_Safe_Base64_SHA256 = string
-type URL_Safe_Base64_MD5 = string
-type UTC_DateTime = string
 
-interface S3ReferenceItem {
-  sha256?: URL_Safe_Base64_SHA256;
-  md5?: Base64_MD5;
+/// ----------------------
+/// Node.js Stream helpers
 
-  images: CUID[];
-
-  size: number;
-  mimetype: string;
-  width: number;
-  height: number;
-
-  uploadCompletedAt: UTC_DateTime;
-  lastFileName: String;
-}
-
-interface ImageItem {
-  cuid: CUID;
-  sha256: URL_Safe_Base64_SHA256;
-  md5: URL_Safe_Base64_MD5;
-
-  collections?: CUID[];
-  createdAt: UTC_DateTime;
-  uploadCompletedAt: UTC_DateTime;
-
-  name: string;
-  // blob?: URL; // Not actually stored in DynamoDB as it can be constructed from`name` and`mimetype`
-  size: number;
-  mimetype: string;
-
-  width: number;
-  height: number;
-}
-
-interface CollectionItem {
-  cuid: CUID;
-  name: string;
-  images: CUID[];
-}
-
-function readableBody(body: Body) : Readable {
+function readableBody(body: Body): Readable {
   let blob: Readable;
   if (body instanceof Readable) {
     blob = body
@@ -301,33 +340,34 @@ function pipePromise<D extends NodeJS.WritableStream, T>(blob: Readable, destina
   });
 }
 
+
+/// --------------------------
+/// High level ImageRepository
+
 export class ImageRepository {
-  readonly s3: S3;
-  readonly dynamoDb: DynamoDB.DocumentClient;
+  readonly s3: S3ImageRepositoryBuckets;
+  readonly db: DynamoDBImageRepositoryTables;
   readonly imageSizeLimit: number;
 
-  constructor(dynamoDb: DynamoDB.DocumentClient, s3: S3, maxImageSizeInBytes?: number) {
-    this.dynamoDb = dynamoDb;
+  constructor(s3: S3ImageRepositoryBuckets, db: DynamoDBImageRepositoryTables, maxImageSizeInBytes?: number) {
     this.s3 = s3;
+    this.db = db;
     this.imageSizeLimit = maxImageSizeInBytes || /* 50MB */50 * 1024 * 1024;
   }
 
-  async createFrom(body: Body, name: string): Promise<ImageItem> {
+  async createFrom(body: Body, name: string): Promise<Image> {
     const id = scuid()
     let readable = readableBody(body)
     let meter = streamMeter(this.imageSizeLimit)
+
     // Stream into counting and hashing functions while uploading to S3
     let bytesCounter = pipePromise(readable, meter,                m => m.bytes)
     let digestSHA256 = pipePromise(readable, createHash('SHA256'), h => h.digest())
     let digestMD5    = pipePromise(readable, createHash('MD5'),    h => h.digest())
 
-    //1. Copy body to temporary upload bucket, while calculating SHA-256 and metadata
-    let params: S3.PutObjectRequest = {
-      Bucket: UPLOAD_BUCKET,
-      Key: id,
-      Body: body
-    }
-    let uploadResult = await this.s3.putObject(params, undefined).promise()
+    //1. Stream body to temporary upload bucket, while calculating SHA-256 and metadata
+    let uploadResult = await this.s3.putUpload(id, body).promise()
+    let uploadCompleted = new Date(); //<-- Can't get from S3 PUT response???
 
     //2. Check the upload was successful
     let size = await bytesCounter //TODO: test what happens when size limit was reached during upload
@@ -338,47 +378,54 @@ export class ImageRepository {
       // See docs for details: https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPUT.html
       throw new Error("Body corrupted during transfer. Expected MD5: " + md5 + ", but S3 got: " + uploadResult.ETag);
     }
+
     //3. Add a record to reference table to ensure the upload gets moved to images bucket eventually
     let sha256bits = await digestSHA256
     let sha256 = base64url.encode(sha256bits)
     let imageRef: S3ReferenceItem = {
       sha256: sha256,
       md5: md5,
-      images: [id], //fixme: needs a set-type add !
+      images: [id],
+
       size: size,
-      mimetype: mimetype,
-      width: width,
-      height: height,
-      uploadCompletedAt: new Date().toUTCString(),
+      mimetype: "application/octet-stream", //FIXME
+      width: 0xDEADBEEF, //FIXME
+      height: 0xDEADBEEF, //FIXME
+
+      uploadCompletedAt: uploadCompleted,
       lastFileName: name
     };
-    await this.dynamoDb.put({ TableName: S3REFS_TABLE, Item: imageRef })
+    await this.db.addReference(imageRef);
 
     //4. Don't just wait for DynamoDB Streams handler, start the upload to permanent copy process immediately!
-    // let image: ImageItem = {
-    //   cuid: id,
-    //   sha256: sha256,
-    //   md5: md5,
-    //   name: name,
-    //   createdAt: new Date().toUTCString(),
-    // };
-    // let imageParams = object_to_updateItemInput(IMAGES_TABLE, { "cuid": { "S": id } }, image)
-    // await this.dynamoDb.update(imageRefParams)
-    // return image;
+    //   Create (or Update) an Image DynamoDB item using the S3-reference
+    let image: Image;
+    let createImage = () => {
+      let result = this.db.createImage(id, { ...imageRef, name: imageRef.lastFileName }, "now");
+      image = result.image;
+      return result.dbUpdateResult.promise();
+    }
+    await this.s3.moveUploadToImageBucket(id, md5, sha256, createImage);
+    return image;
   }
 }
 
-export const IS_OFFLINE = process.env.IS_OFFLINE === 'true';
 
 /// ------------------------
 /// Default Image Repository
-export const images = new ImageRepository(
+
+export const IS_OFFLINE = process.env.IS_OFFLINE === 'true';
+export const s3 = new S3ImageRepositoryBuckets(
+  new S3(IS_OFFLINE ? { endpoint: "localhost:8001" } : {})
+);
+export const db = new DynamoDBImageRepositoryTables(
   new DynamoDB.DocumentClient(
     IS_OFFLINE ? {
       region: 'localhost',
       endpoint: 'http://localhost:8000'
-    } : {}),
-  new S3(IS_OFFLINE ? { endpoint: "localhost:8001" } : {})
+    } : {})
 );
+export const images = new ImageRepository(s3, db);
+export const stream = new ImageRepository_DynamoDB_StreamHandler(s3, db);
 
 console.log(COLLECTIONS_TABLE); // Make TypeScript shut up about unused reference for now
