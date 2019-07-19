@@ -16,9 +16,9 @@ type URL_Safe_Base64_SHA256 = string
 type Base64_MD5 = string
 
 export const mimetypeFileExtension = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif"
+  "image/png":  ".png",
+  "image/jpeg": ".jpg",
+  "image/gif":  ".gif"
 }
 
 export interface ImageBlobData {
@@ -42,6 +42,7 @@ export interface Image extends ImageBlobData {
   createdAt: Date
   collections?: CUID[]
   name: string
+  s3url: string
 }
 export interface CollectionItem {
   cuid: CUID;
@@ -70,7 +71,7 @@ export class S3ImageRepositoryBuckets {
   }
 
   urlOf(sha256: string, mimetype: string) {
-    const url = this.s3.config.endpoint + '/' + this.imagesBucket + '/' + sha256 + '.' + (mimetypeFileExtension[mimetype] || '')
+    const url = 'https://' + this.s3.config.endpoint + '/' + this.imagesBucket + '/' + sha256 + (mimetypeFileExtension[mimetype] || '')
     console.log('S3 URL', url);
     return url
   }
@@ -169,7 +170,7 @@ export class DynamoDBImageRepositoryTables {
    * @param input Image item attributes, requires sha256 and all S3-object related properties
    */
   createImage(cuid: string, newImage: Readonly<ImageInput>, creationTimestamp: Date | "now") {
-    let { uploadCompletedAt } = newImage;
+    let { sha256, mimetype, uploadCompletedAt } = newImage;
     let createdAt = (creationTimestamp == "now" ? new Date() : creationTimestamp)
     let input = Object.freeze({
       ...newImage,
@@ -185,6 +186,7 @@ export class DynamoDBImageRepositoryTables {
       cuid: cuid,
       createdAt: createdAt,
       uploadCompletedAt: uploadCompletedAt,
+      s3url: s3.urlOf(sha256, mimetype)
     }))(input);
     return { image: Object.freeze(image), dbParams: params, dbUpdateResult: this.db.update(params) };
   }
