@@ -4,13 +4,13 @@ import { PromiseResult } from "aws-sdk/lib/request";
 import { Body } from "aws-sdk/clients/s3";
 import { createHash } from "crypto";
 import base64url from "base64url";
-import { Readable } from "stream";
+import { Readable, PassThrough } from "stream";
 import * as streamMeter from "stream-meter";
 var scuid: () => string = require('scuid');
 
-/// ----------
-/// Data Types
-
+/*----------
+  Data Types
+------------*/
 type CUID = string
 type URL_Safe_Base64_SHA256 = string
 type Base64_MD5 = string
@@ -51,9 +51,9 @@ export interface CollectionItem {
 }
 
 
-/// ------
-/// S3 ops
-
+/*------
+  S3 ops
+--------*/
 function s3_ignoreNoSuchKeyError(reason: AWSError) {
   if ("NoSuchKey" != reason.code) throw reason;
   else console.log("Ignored AWSError", reason);
@@ -121,9 +121,9 @@ export class S3ImageRepositoryBuckets {
 }
 
 
-/// ---------------
-/// DynamoDB Tables
-
+/*---------------
+  DynamoDB Tables
+-----------------*/
 export const object_to_updateItemInput = (tableName: string, key: Key, input: object): DynamoDB.UpdateItemInput => {
   var expr: string = null;
   let values = {};
@@ -193,9 +193,9 @@ export class DynamoDBImageRepositoryTables {
 }
 
 
-/// ------------------------
-/// DynamoDB Stream handlers
-
+/*------------------------
+  DynamoDB Stream handlers
+--------------------------*/
 type AWSResult<T extends object> = PromiseResult<T, AWSError>
 type AWSResults = AWSResult<object>[]
 type AWSPromises = Promise<AWSResults>
@@ -319,9 +319,9 @@ export class ImageRepository_DynamoDB_StreamHandler {
 }
 
 
-/// ----------------------
-/// Node.js Stream helpers
-
+/*----------------------
+  Node.js Stream helpers
+------------------------*/
 function readableBody(body: Body): Readable {
   let blob: Readable;
   if (body instanceof Readable) {
@@ -343,9 +343,9 @@ function pipePromise<D extends NodeJS.WritableStream, T>(blob: Readable, destina
 }
 
 
-/// --------------------------
-/// High level ImageRepository
-
+/*--------------------------
+  High level ImageRepository
+----------------------------*/
 export class ImageRepository {
   readonly s3: S3ImageRepositoryBuckets;
   readonly db: DynamoDBImageRepositoryTables;
@@ -413,9 +413,9 @@ export class ImageRepository {
 }
 
 
-/// ------------------------
-/// Default Image Repository
-
+/*------------------------
+  Default Image Repository
+--------------------------*/
 export const IS_OFFLINE = process.env.IS_OFFLINE === 'true';
 export const s3 = new S3ImageRepositoryBuckets(
   new S3(IS_OFFLINE ? { endpoint: "localhost:8001" } : {})
