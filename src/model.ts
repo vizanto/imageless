@@ -323,23 +323,13 @@ export class ImageRepository_DynamoDB_StreamHandler {
   Node.js Stream helpers
 ------------------------*/
 function readableBody(body: Body): Readable {
-  let blob: Readable;
   if (body instanceof Readable) {
-    blob = body
+    return body
   } else {
-    blob = new Readable()
-    blob.push(body)
-    blob.push(null)
+    let blob = new PassThrough()
+    blob.end(body)
+    return blob
   }
-  return blob
-}
-
-function pipePromise<D extends NodeJS.WritableStream, T>(blob: Readable, destination: D, onEnd: (destination: D) => T): Promise<T> {
-  blob.pipe(destination)
-  return new Promise<T>((resolve, reject) => {
-    blob.on('error', reject)
-    blob.on('end', () => resolve(onEnd(destination)))
-  });
 }
 
 
@@ -357,49 +347,55 @@ export class ImageRepository {
     this.imageSizeLimit = maxImageSizeInBytes || /* 50MB */50 * 1024 * 1024;
   }
 
+  async streamMetadata(readable: Readable): Promise<ImageBlobData> {
+    let meter  = readable.pipe(streamMeter(this.imageSizeLimit))
+    let SHA256 = readable.pipe(createHash('SHA256'))
+    let MD5    = readable.pipe(createHash('MD5'))
+    return new Promise((resolve, reject) => {
+      readable.on('error', reject) //TODO: Test if size limit rejects!
+      readable.on('end', () => {
+        let now = new Date();
+        resolve({
+          size: meter.bytes,
+          md5: MD5.digest().toString("base64"),
+          sha256: base64url.encode(SHA256.digest()),
+          uploadCompletedAt: now,
+          mimetype: "application/octet-stream", //FIXME
+          width: 0xDEADBEEF, //FIXME
+          height: 0xDEADBEEF, //FIXME
+        });
+      });
+    });
+  }
+
   async createFrom(body: Body, name: string): Promise<Image> {
     const id = scuid()
     let readable = readableBody(body)
-    let meter = streamMeter(this.imageSizeLimit)
-
-    // Stream into counting and hashing functions while uploading to S3
-    let bytesCounter = pipePromise(readable, meter,                m => m.bytes)
-    let digestSHA256 = pipePromise(readable, createHash('SHA256'), h => h.digest())
-    let digestMD5    = pipePromise(readable, createHash('MD5'),    h => h.digest())
 
     //1. Stream body to temporary upload bucket, while calculating SHA-256 and metadata
-    let uploadResult = await this.s3.putUpload(id, body).promise()
+    let metadata = this.streamMetadata(readable)
+    let uploadResult = await this.s3.putUpload(id, readable).promise()
     let uploadCompleted = new Date(); //<-- Can't get from S3 PUT response???
 
     //2. Check the upload was successful
-    let size = await bytesCounter //TODO: test what happens when size limit was reached during upload
-    let md5bits = await digestMD5
-    let md5 = md5bits.toString("base64")
+    //TODO: test what happens when size limit was reached during upload
+    let imageBlobData = await metadata
+    let {md5, sha256} = imageBlobData
     if (md5 != uploadResult.ETag && !uploadResult.ServerSideEncryption) {
-      // S3 will return the MD5 hash in certain cases, e.g. no server-side encryption and size below 5GB
+      // S3's ETag will be a MD5 hash only in certain cases, e.g. no server-side encryption and size below 5GB.
       // See docs for details: https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPUT.html
       throw new Error("Body corrupted during transfer. Expected MD5: " + md5 + ", but S3 got: " + uploadResult.ETag);
     }
 
-    //3. Add a record to reference table to ensure the upload gets moved to images bucket eventually
-    let sha256bits = await digestSHA256
-    let sha256 = base64url.encode(sha256bits)
-    let imageRef: S3ReferenceItem = {
-      sha256: sha256,
-      md5: md5,
-      images: [id],
-
-      size: size,
-      mimetype: "application/octet-stream", //FIXME
-      width: 0xDEADBEEF, //FIXME
-      height: 0xDEADBEEF, //FIXME
-
+    //3. Add a record to reference table to ensure the upload is eventually moved to the images bucket
+    let imageRef: S3ReferenceItem = {...imageBlobData,
       uploadCompletedAt: uploadCompleted,
+      images: [id],
       lastFileName: name
     };
     await this.db.addReference(imageRef);
 
-    //4. Don't just wait for DynamoDB Streams handler, start the upload to permanent copy process immediately!
+    //4. Don't just wait for DynamoDB Streams handler, start the move process immediately!
     //   Create (or Update) an Image DynamoDB item using the S3-reference
     let image: Image;
     let createImage = () => {
