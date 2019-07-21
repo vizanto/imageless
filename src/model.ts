@@ -85,6 +85,10 @@ export class S3ImageRepositoryBuckets {
     return this.s3.putObject(params, undefined);
   }
 
+  getUpload(id: CUID) {
+    return this.s3.getObject({Bucket: this.uploadBucket, Key: id}, undefined);
+  }
+
   copyFromUploadBucket(cuid: string, eTag: string, sha256: string) {
     return this.s3.copyObject({
       CopySource: this.uploadBucket + "/" + cuid,
@@ -366,6 +370,25 @@ export class ImageRepository {
         });
       });
     });
+  }
+
+  /**
+   * Read an already created object from S3 to calculate its metadata.
+   * Especially useful to process Pre-signed URL client uploads.
+   * @param cuid The upload S3-key
+   */
+  async calculateMetadataFromUpload(cuid: CUID): Promise<ImageBlobData> {
+    let upload = await this.s3.getUpload(cuid).promise();
+    let readable = readableBody(upload.Body);
+    let meta = await this.streamMetadata(readable);
+
+    // Make sure the whole object is piped through
+    readable.on("data", () => {/* Do nothing. This handler makes sure the stream never pauses. */ });
+
+    if (meta.size != upload.ContentLength) {
+      throw new Error(`Expected upload:${cuid} to be of size: ${meta.size}, but S3 size is: ${upload.ContentLength}`);
+    }
+    return {...meta, uploadCompletedAt: upload.LastModified};
   }
 
   async createFrom(body: Body, name: string): Promise<Image> {
