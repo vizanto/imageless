@@ -34,6 +34,10 @@ export interface S3ReferenceItem extends ImageBlobData {
   images: CUID[];
   lastFileName: string;
 }
+export interface S3ImageKey {
+  sha256: URL_Safe_Base64_SHA256
+  mimetype: string
+}
 export interface ImageInput extends ImageBlobData {
   name: string
 }
@@ -70,7 +74,7 @@ export class S3ImageRepositoryBuckets {
     this.imagesBucket = imagesBucketName || 'images';
   }
 
-  urlOf(sha256: string, mimetype: string) {
+  urlOf({ sha256, mimetype }: S3ImageKey) {
     const url = 'https://' + this.s3.config.endpoint + '/' + this.imagesBucket + '/' + sha256 + (mimetypeFileExtension[mimetype] || '')
     console.log('S3 URL', url);
     return url
@@ -89,18 +93,19 @@ export class S3ImageRepositoryBuckets {
     return this.s3.getObject({Bucket: this.uploadBucket, Key: id}, undefined);
   }
 
-  copyFromUploadBucket(cuid: string, eTag: string, sha256: string) {
+  copyFromUploadBucket(cuid: string, eTag: string, { sha256, mimetype }: S3ImageKey) {
     return this.s3.copyObject({
       CopySource: this.uploadBucket + "/" + cuid,
       CopySourceIfMatch: eTag,
+      ContentType: mimetype,
       Bucket: this.imagesBucket,
-      Key: sha256
+      Key: sha256 + (mimetypeFileExtension[mimetype] || '')
     }, null)
   }
 
-  async moveUploadToImageBucket<T>(cuid: string, eTag: string, sha256: URL_Safe_Base64_SHA256, onCopyCompleted: () => Promise<T>) {
+  async moveUploadToImageBucket<T>(cuid: string, eTag: string, image: S3ImageKey, onCopyCompleted: () => Promise<T>) {
     // 1. Copy from upload to image bucket if not exists
-    let copyOp = this.copyFromUploadBucket(cuid, eTag, sha256).promise();
+    let copyOp = this.copyFromUploadBucket(cuid, eTag, image).promise();
     copyOp.catch(s3_ignoreNoSuchKeyError)
     let copyResult = await copyOp;
     // 2. Notify caller copy was completed, usually to Create or Update an Image DynamoDB item for this upload
@@ -174,7 +179,7 @@ export class DynamoDBImageRepositoryTables {
    * @param input Image item attributes, requires sha256 and all S3-object related properties
    */
   createImage(cuid: string, newImage: Readonly<ImageInput>, creationTimestamp: Date | "now") {
-    let { sha256, mimetype, uploadCompletedAt } = newImage;
+    let { uploadCompletedAt } = newImage;
     let createdAt = (creationTimestamp == "now" ? new Date() : creationTimestamp)
     let input = Object.freeze({
       ...newImage,
@@ -190,7 +195,7 @@ export class DynamoDBImageRepositoryTables {
       cuid: cuid,
       createdAt: createdAt,
       uploadCompletedAt: uploadCompletedAt,
-      s3url: s3.urlOf(sha256, mimetype)
+      s3url: s3.urlOf(newImage)
     }))(input);
     return { image: Object.freeze(image), dbParams: params, dbUpdateResult: this.db.update(params) };
   }
@@ -224,7 +229,7 @@ export class ImageRepository_DynamoDB_StreamHandler {
     // Prepare to Create (or Update) an Image DynamoDB item using the S3-reference
     let createImage = () => this.db.createImage(cuid, newImage, "now").dbUpdateResult.promise();
     // Move the S3 object from upload to image bucket
-    let moveOp = await this.s3.moveUploadToImageBucket(cuid, newImage.md5, newImage.sha256, createImage);
+    let moveOp = await this.s3.moveUploadToImageBucket(cuid, newImage.md5, newImage, createImage);
     // Success!
     return {
       awsResults: { ...moveOp.awsResults, dbUpdate: moveOp.afterCopyCompleted },
@@ -403,7 +408,7 @@ export class ImageRepository {
     //2. Check the upload was successful
     //TODO: test what happens when size limit was reached during upload
     let imageBlobData = await metadata
-    let {md5, sha256} = imageBlobData
+    let {md5} = imageBlobData
     if (md5 != uploadResult.ETag && !uploadResult.ServerSideEncryption) {
       // S3's ETag will be a MD5 hash only in certain cases, e.g. no server-side encryption and size below 5GB.
       // See docs for details: https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPUT.html
@@ -426,7 +431,7 @@ export class ImageRepository {
       image = result.image;
       return result.dbUpdateResult.promise();
     }
-    await this.s3.moveUploadToImageBucket(id, md5, sha256, createImage);
+    await this.s3.moveUploadToImageBucket(id, md5, imageRef, createImage);
     return image;
   }
 }
