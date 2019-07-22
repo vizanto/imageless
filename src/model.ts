@@ -67,11 +67,16 @@ export class S3ImageRepositoryBuckets {
   private s3: S3;
   readonly uploadBucket: string;
   readonly imagesBucket: string;
+  /**
+   * Size threshold when to start uploading in chunks.
+   * See `partSize` option: https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3/ManagedUpload.html#constructor-property */
+  readonly imagePartSize: number;
 
-  constructor(s3: S3, imagesBucketName?: string, uploadBucketName?: string) {
+  constructor(s3: S3, imagesBucketName?: string, uploadBucketName?: string, imagePartSizeInBytes?: number) {
     this.s3 = s3;
     this.uploadBucket = uploadBucketName || 'upload';
     this.imagesBucket = imagesBucketName || 'images';
+    this.imagePartSize = imagePartSizeInBytes || /* 50MB */50 * 1024 * 1024;
   }
 
   urlOf({ sha256, mimetype }: S3ImageKey) {
@@ -79,13 +84,13 @@ export class S3ImageRepositoryBuckets {
     return url
   }
 
-  putUpload(id: CUID, body: Body) {
+  upload(id: CUID, body: Body) {
     let params: S3.PutObjectRequest = {
       Bucket: this.uploadBucket,
       Key: id,
       Body: body
     }
-    return this.s3.putObject(params, undefined);
+    return this.s3.upload(params, { partSize: this.imagePartSize, leavePartsOnError: false })
   }
 
   getUpload(id: CUID) {
@@ -330,7 +335,7 @@ export class ImageRepository_DynamoDB_StreamHandler {
 /*----------------------
   Node.js Stream helpers
 ------------------------*/
-function readableBody(body: Body): Readable {
+export function readableBody(body: Body): Readable {
   if (body instanceof Readable) {
     return body
   } else {
@@ -347,22 +352,28 @@ function readableBody(body: Body): Readable {
 export class ImageRepository {
   readonly s3: S3ImageRepositoryBuckets;
   readonly db: DynamoDBImageRepositoryTables;
-  readonly imageSizeLimit: number;
 
-  constructor(s3: S3ImageRepositoryBuckets, db: DynamoDBImageRepositoryTables, maxImageSizeInBytes?: number) {
+  constructor(s3: S3ImageRepositoryBuckets, db: DynamoDBImageRepositoryTables) {
     this.s3 = s3;
     this.db = db;
-    this.imageSizeLimit = maxImageSizeInBytes || /* 50MB */50 * 1024 * 1024;
   }
 
   async streamMetadata(readable: Readable): Promise<ImageBlobData> {
-    let meter  = readable.pipe(streamMeter(this.imageSizeLimit))
-    let SHA256 = readable.pipe(createHash('SHA256'))
-    let MD5    = readable.pipe(createHash('MD5'))
+    let meter  = streamMeter(s3.imagePartSize) // Limit uploads to a single part. Ensures S3 ETags are always an MD5 hash
+    let SHA256 = createHash('SHA256')
+    let MD5    = createHash('MD5')
+    readable.on('data', (chunk) => {
+      // Don't expect wrapping above the definitions in readable.pipe() to just work, because NodeJS is shit.
+      // We can pipe after (!!!) defining the promise, but that's not less lines of code or less error prone.
+      meter.write(chunk)
+      SHA256.write(chunk)
+      MD5.write(chunk)
+    })
     return new Promise((resolve, reject) => {
       readable.on('error', reject) //TODO: Test if size limit rejects!
       readable.on('end', () => {
         let now = new Date();
+        now.setMilliseconds(0); //S3 stores Last-Modified with per-second precision
         resolve({
           size: meter.bytes,
           md5: MD5.digest().toString("base64"),
@@ -385,10 +396,6 @@ export class ImageRepository {
     let upload = await this.s3.getUpload(cuid).promise();
     let readable = readableBody(upload.Body);
     let meta = await this.streamMetadata(readable);
-
-    // Make sure the whole object is piped through
-    readable.on("data", () => {/* Do nothing. This handler makes sure the stream never pauses. */ });
-
     if (meta.size != upload.ContentLength) {
       throw new Error(`Expected upload:${cuid} to be of size: ${meta.size}, but S3 size is: ${upload.ContentLength}`);
     }
@@ -401,14 +408,14 @@ export class ImageRepository {
 
     //1. Stream body to temporary upload bucket, while calculating SHA-256 and metadata
     let metadata = this.streamMetadata(readable)
-    let uploadResult = await this.s3.putUpload(id, readable).promise()
+    let uploadResult = await this.s3.upload(id, readable).promise()
     let uploadCompleted = new Date(); //<-- Can't get from S3 PUT response???
 
     //2. Check the upload was successful
     //TODO: test what happens when size limit was reached during upload
     let imageBlobData = await metadata
     let {md5} = imageBlobData
-    if (md5 != uploadResult.ETag && !uploadResult.ServerSideEncryption) {
+    if (md5 != uploadResult.ETag) {
       // S3's ETag will be a MD5 hash only in certain cases, e.g. no server-side encryption and size below 5GB.
       // See docs for details: https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPUT.html
       throw new Error("Body corrupted during transfer. Expected MD5: " + md5 + ", but S3 got: " + uploadResult.ETag);
