@@ -58,11 +58,6 @@ export interface CollectionItem {
 /*------
   S3 ops
 --------*/
-function s3_ignoreNoSuchKeyError(reason: AWSError) {
-  if ("NoSuchKey" != reason.code) throw reason;
-  else console.log("Ignored AWSError", reason);
-}
-
 export class S3ImageRepositoryBuckets {
   private s3: S3;
   readonly uploadBucket: string;
@@ -155,16 +150,38 @@ export class S3ImageRepositoryBuckets {
     }, null)
   }
 
-  async moveUploadToImageBucket<T>(cuid: string, eTag: string, image: S3ImageKey, onCopyCompleted: () => Promise<T>) {
+  /**
+   * Moves an upload to image bucket
+   * @param cuid uploaded object (source)
+   * @param eTag checksum
+   * @param image destination
+   * @param onImageReady called as soon as object in image bucket exists, usually to Create or Update an Image DynamoDB item for this upload
+   */
+  async moveUploadToImageBucket<T>(cuid: string, eTag: string, image: S3ImageKey, onImageReady: (image: "copied" | "existed") => Promise<T>) {
     // 1. Copy from upload to image bucket if not exists
     let copyOp = this.copyFromUploadBucket(cuid, eTag, image).promise();
-    copyOp.catch(s3_ignoreNoSuchKeyError)
-    let copyResult = await copyOp;
-    // 2. Notify caller copy was completed, usually to Create or Update an Image DynamoDB item for this upload
-    let handlerResult = await onCopyCompleted();
+    let copyResult: PromiseResult<S3.CopyObjectOutput, AWSError>;
+    try {
+      copyResult = await copyOp;
+    } catch (reason) {
+      if (reason.statusCode == 404) {
+        try {
+          // Check if the intended destination exists
+          let headResult = await s3.headImage(image).promise();
+          // It exists! Continue as if upload was copied...
+          return {
+            awsResults: { s3Head: headResult },
+            afterCopyCompleted: await onImageReady("existed")
+          }
+        } catch {
+          throw reason; // Nope. Abort!
+        }
+      }
+    }
+    // 2. Notify caller copy was completed
+    let handlerResult = await onImageReady("copied");
     // 3. Success! Clean up the S3 upload bucket
     let deleteOp = this.deleteFromUploadBucket(cuid).promise();
-    deleteOp.catch(s3_ignoreNoSuchKeyError)
     let deleteResult = await deleteOp;
     return {
       awsResults: { s3Copy: copyResult, s3Delete: deleteResult },
@@ -328,7 +345,6 @@ export class ImageRepository_DynamoDB_StreamHandler {
       case "REMOVE":
         // Delete from S3 when all references to an S3-object are removed from DynamoDB
         let deleteOp = s3.deleteUnreferencedImage({ sha256: sha256, mimetype: record.OldImage.mimetype.S }).promise()
-        deleteOp.catch(s3_ignoreNoSuchKeyError)
         return deleteOp.then(r => [r])
       case "MODIFY":
         // Synchronize changes to S3-references items with actual S3 storage

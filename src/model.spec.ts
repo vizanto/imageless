@@ -1,8 +1,6 @@
-import { s3, readableBody, IS_OFFLINE } from './model'
+import { s3, readableBody, IS_OFFLINE, S3ImageKey } from './model'
 import * as getStream from 'get-stream'
 import base64url from 'base64url';
-import * as AWS from 'aws-sdk';
-import { PromiseResult } from 'aws-sdk/lib/request';
 
 /*-------
   Helpers
@@ -10,13 +8,16 @@ import { PromiseResult } from 'aws-sdk/lib/request';
 
 // Quotes: https://github.com/aws/aws-sdk-net/issues/815
 // ETag:   echo -n 'This is not an image' |openssl dgst -md5
+// SHA256: echo -n 'This is not an image' |openssl dgst -sha256
 const notImageData = 'This is not an image'
 const notImageETag = '\"2c3cd6f2e5c6fc39aba84f8a622450cd\"'
+const notImageSHA256 = base64url.encode(Buffer.from('fdc5aca2dc1c8602fcdb5c458ee9deaa6001eb672006026b6adb4274b0f73151', 'hex'))
+const notImageS3Key = { sha256: notImageSHA256, mimetype: 'application/octet-stream' }
 
-const expectNoSuchKey = (promise: Promise<PromiseResult<object, AWS.AWSError>>) =>
+const expectNoSuchKey = (promise: Promise<object>) =>
   expect(promise).rejects.toMatchObject({ code: "NoSuchKey", message: "The specified key does not exist." });
-const expectUploadToBeDeleted = (id) => expectNoSuchKey(s3.getUpload(id).promise());
-const expectImageToBeDeleted = (key) => expect(s3.headImage(key).promise()).rejects.toMatchObject({ code: "NotFound" });
+const expectUploadToNotExist = (id: string) => expectNoSuchKey(s3.getUpload(id).promise());
+const expectImageToNotExist = (key: S3ImageKey) => expect(s3.headImage(key).promise()).rejects.toMatchObject({ code: "NotFound" });
 
 
 /*-----
@@ -45,17 +46,13 @@ describe('S3 operations', () => {
     let imageMeta = await imageMetaStream
     let imageComputed = await s3.calculateMetadataFromUpload(id)
 
-    // echo -n 'This is not an image' |openssl dgst -sha256
-    expect(base64url.toBuffer(imageComputed.sha256).toString('hex'))
-      .toEqual('fdc5aca2dc1c8602fcdb5c458ee9deaa6001eb672006026b6adb4274b0f73151')
-    expect(base64url.toBuffer(imageMeta.sha256).toString('hex'))
-      .toEqual('fdc5aca2dc1c8602fcdb5c458ee9deaa6001eb672006026b6adb4274b0f73151')
-
+    expect(imageComputed.sha256).toEqual(notImageSHA256)
+    expect(imageMeta.sha256).toEqual(notImageSHA256)
     expect(imageMeta).toEqual(imageComputed)
 
     // Cleanup after above tests
     await s3.deleteFromUploadBucket(id).promise()
-    expectUploadToBeDeleted(id)
+    expectUploadToNotExist(id)
   });
 
   describe('should support moving an uploaded image to content-addressable storage', () => {
@@ -69,11 +66,36 @@ describe('S3 operations', () => {
         expect(uploaded.ETag).toBe(notImageETag) // Check the upload still exists
       })
       expect(s3Copy.CopyObjectResult.ETag).toBe(notImageETag)
-      expectUploadToBeDeleted(id)
+      expectUploadToNotExist(id)
 
       // Cleanup after above tests
       await s3.deleteUnreferencedImage(image).promise()
-      expectImageToBeDeleted(image)
+      expectImageToNotExist(image)
+    });
+
+    it('should FAIL when both upload (ID) and destination (SHA-256) do not exist', async () => {
+      const key = { sha256: 'FAKE-SHA256', mimetype: 'French' }
+      expectImageToNotExist(key)
+      try {
+        await s3.moveUploadToImageBucket('never-uploaded', 'bogus', key, () => Promise.reject(new Error('Test failed: Copy should not succeed')))
+        throw 'Test failed';
+      }
+      catch (reason) {
+        expect(reason).toMatchObject({ code: "NoSuchKey", message: "The specified key does not exist." });
+      }
+    });
+
+    it('should SUCCEED when upload (ID) does not exist, but destination (SHA-256) does', async () => {
+      await s3.upload('just-uploaded', notImageData).promise()
+      await s3.moveUploadToImageBucket('just-uploaded', notImageETag, notImageS3Key, () => Promise.resolve())
+      let result = await s3.moveUploadToImageBucket('never-uploaded', 'bogus', notImageS3Key, () => Promise.resolve('Post copy op'))
+      expect(result.afterCopyCompleted).toBe('Post copy op')
+      expect(result.awsResults.s3Delete).not.toBeNull()
+      expect(result.awsResults.s3Head.ETag).toBe(notImageETag)
+
+      // Cleanup after above tests
+      await s3.deleteUnreferencedImage(notImageS3Key).promise()
+      expectImageToNotExist(notImageS3Key)
     });
 
     it('should not fail when upload is already deleted (due to Streams handler or other process) after copying', async () => {
@@ -84,15 +106,15 @@ describe('S3 operations', () => {
       await s3.upload(id, data).promise()
       let { awsResults: { s3Copy } } = await s3.moveUploadToImageBucket(id, notImageETag, image, async () => {
         await s3.deleteFromUploadBucket(id).promise()
-        expectUploadToBeDeleted(id)
+        expectUploadToNotExist(id)
       })
       expect(s3Copy.CopyObjectResult.ETag).toBe(notImageETag)
-      expectUploadToBeDeleted(id)
+      expectUploadToNotExist(id)
       expect(await s3.headImage(image).promise()).toMatchObject({ ContentLength: notImageData.length + 2, ETag: notImageETag })
 
       // Cleanup after above tests
       await s3.deleteUnreferencedImage(image).promise()
-      expectImageToBeDeleted(image)
+      expectImageToNotExist(image)
     });
   });
 });
