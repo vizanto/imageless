@@ -1,0 +1,16 @@
+{
+  "cSpell.ignoreWords": [
+    "cuids",
+    "divyenduz",
+    "scuid"
+  ],
+  "terminal.integrated.env.linux": {
+    "IS_OFFLINE": "true",
+    "PATH": "${workspaceRoot}/.bin:${env:PATH}"
+  },
+  "terminal.integrated.env.osx": {
+    "IS_OFFLINE": "true",
+    "PATH": "${workspaceRoot}/.bin:${env:PATH}"
+  },
+  "jest.pathToJest": "env IS_OFFLINE=true ./node_modules/jest/bin/jest.js"
+}

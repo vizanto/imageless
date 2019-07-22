@@ -11,9 +11,7 @@
     "rootDir": "src",
     "outDir": "lib"
   },
-  "exclude": [
-    "node_modules"
-  ],
+  "exclude": ["node_modules", "**/*.spec.ts"],
   "plugins": [
     {
       "name": "@divyenduz/ts-graphql-plugin"
