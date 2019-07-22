@@ -79,9 +79,12 @@ export class S3ImageRepositoryBuckets {
     this.imagePartSize = imagePartSizeInBytes || /* 50MB */50 * 1024 * 1024;
   }
 
-  urlOf({ sha256, mimetype }: S3ImageKey) {
-    const url = this.s3.config.endpoint + '/' + this.imagesBucket + '/' + sha256 + (mimetypeFileExtension[mimetype] || '')
-    return url
+  imageS3Key({ sha256, mimetype }: S3ImageKey) {
+    return sha256 + (mimetypeFileExtension[mimetype] || '')
+  }
+
+  urlOf(key: S3ImageKey) {
+    return this.s3.config.endpoint + '/' + this.imagesBucket + '/' + this.imageS3Key(key)
   }
 
   upload(id: CUID, body: Body) {
@@ -94,16 +97,16 @@ export class S3ImageRepositoryBuckets {
   }
 
   getUpload(id: CUID) {
-    return this.s3.getObject({Bucket: this.uploadBucket, Key: id}, undefined);
+    return this.s3.getObject({ Bucket: this.uploadBucket, Key: id }, undefined);
   }
 
-  copyFromUploadBucket(cuid: string, eTag: string, { sha256, mimetype }: S3ImageKey) {
+  protected copyFromUploadBucket(cuid: string, eTag: string, key: S3ImageKey) {
     return this.s3.copyObject({
       CopySource: this.uploadBucket + "/" + cuid,
       CopySourceIfMatch: eTag,
-      ContentType: mimetype,
+      ContentType: key.mimetype,
       Bucket: this.imagesBucket,
-      Key: sha256 + (mimetypeFileExtension[mimetype] || '')
+      Key: this.imageS3Key(key)
     }, null)
   }
 
@@ -124,12 +127,16 @@ export class S3ImageRepositoryBuckets {
     }
   }
 
+  headImage(key: S3ImageKey) {
+    return this.s3.headObject({ Bucket: this.imagesBucket, Key: this.imageS3Key(key) }, undefined);
+  }
+
   deleteFromUploadBucket(cuid: string) {
     return this.s3.deleteObject({ Bucket: this.uploadBucket, Key: cuid }, null)
   }
 
-  deleteUnreferencedImage(sha256: string) {
-    return this.s3.deleteObject({ Bucket: this.imagesBucket, Key: sha256 }, null);
+  deleteUnreferencedImage(key: S3ImageKey) {
+    return this.s3.deleteObject({ Bucket: this.imagesBucket, Key: this.imageS3Key(key) }, null);
   }
 }
 
@@ -275,7 +282,7 @@ export class ImageRepository_DynamoDB_StreamHandler {
         return this._concurrentMoveUploadsAndCreateImageItems(newImage.images.SS, sha256, newImage)
       case "REMOVE":
         // Delete from S3 when all references to an S3-object are removed from DynamoDB
-        let deleteOp = s3.deleteUnreferencedImage(sha256).promise()
+        let deleteOp = s3.deleteUnreferencedImage({ sha256: sha256, mimetype: record.OldImage.mimetype.S }).promise()
         deleteOp.catch(s3_ignoreNoSuchKeyError)
         return deleteOp.then(r => [r])
       case "MODIFY":
