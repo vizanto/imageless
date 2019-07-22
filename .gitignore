@@ -6,6 +6,7 @@ jspm_packages
 # Serverless directories
 .serverless
 .dynamodb
+.s3rver-buckets
 
 # Webpack directories
 .webpack

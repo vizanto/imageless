@@ -75,8 +75,7 @@ export class S3ImageRepositoryBuckets {
   }
 
   urlOf({ sha256, mimetype }: S3ImageKey) {
-    const url = 'https://' + this.s3.config.endpoint + '/' + this.imagesBucket + '/' + sha256 + (mimetypeFileExtension[mimetype] || '')
-    console.log('S3 URL', url);
+    const url = this.s3.config.endpoint + '/' + this.imagesBucket + '/' + sha256 + (mimetypeFileExtension[mimetype] || '')
     return url
   }
 
@@ -442,12 +441,18 @@ export class ImageRepository {
 --------------------------*/
 export const IS_OFFLINE = process.env.IS_OFFLINE === 'true';
 export const s3 = new S3ImageRepositoryBuckets(
-  new S3(IS_OFFLINE ? { endpoint: "localhost:8001" } : {})
+  new S3(IS_OFFLINE ? {
+    region: 'eu-central-1',
+    s3ForcePathStyle: true,
+    accessKeyId: 'S3RVER',
+    secretAccessKey: 'S3RVER',
+    endpoint: 'http://localhost:4572'
+  } : {})
 );
 export const db = new DynamoDBImageRepositoryTables(
   new DynamoDB.DocumentClient(
     IS_OFFLINE ? {
-      region: 'localhost',
+      region: 'eu-central-1',
       endpoint: 'http://localhost:8000'
     } : {})
 );
