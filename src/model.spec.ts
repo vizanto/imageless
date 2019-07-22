@@ -1,4 +1,4 @@
-import { s3, images, readableBody, IS_OFFLINE } from './model'
+import { s3, readableBody, IS_OFFLINE } from './model'
 import * as getStream from 'get-stream'
 import base64url from 'base64url';
 import * as AWS from 'aws-sdk';
@@ -34,7 +34,7 @@ describe('S3 operations', () => {
   it('should store objects correctly, and roundtrips result in the same meta-data', async () => {
     const id = 'not-an-image'
     let body = readableBody(notImageData)
-    let imageMetaStream = images.streamMetadata(body)
+    let imageMetaStream = s3.streamMetadata(body)
     let putResponse = await s3.upload(id, body).promise()
 
     expect(putResponse.ETag).toStrictEqual(notImageETag)
@@ -43,7 +43,7 @@ describe('S3 operations', () => {
 
     // Roundtrip check
     let imageMeta = await imageMetaStream
-    let imageComputed = await images.calculateMetadataFromUpload(id)
+    let imageComputed = await s3.calculateMetadataFromUpload(id)
 
     // echo -n 'This is not an image' |openssl dgst -sha256
     expect(base64url.toBuffer(imageComputed.sha256).toString('hex'))

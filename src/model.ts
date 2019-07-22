@@ -96,8 +96,53 @@ export class S3ImageRepositoryBuckets {
     return this.s3.upload(params, { partSize: this.imagePartSize, leavePartsOnError: false })
   }
 
+  async streamMetadata(readable: Readable): Promise<ImageBlobData> {
+    let meter = streamMeter(this.imagePartSize) // Limit uploads to a single part. Ensures S3 ETags are always an MD5 hash
+    let SHA256 = createHash('SHA256')
+    let MD5 = createHash('MD5')
+    readable.on('data', (chunk) => {
+      // Don't expect wrapping above the definitions in readable.pipe() to just work, because NodeJS is shit.
+      // We can pipe after (!!!) defining the promise, but that's not less lines of code or less error prone.
+      meter.write(chunk)
+      SHA256.write(chunk)
+      MD5.write(chunk)
+    })
+    return new Promise((resolve, reject) => {
+      readable.on('error', reject) //TODO: Test if size limit rejects!
+      readable.on('end', () => {
+        let now = new Date();
+        now.setMilliseconds(0); //S3 stores Last-Modified with per-second precision
+        resolve({
+          size: meter.bytes,
+          md5: MD5.digest().toString("base64"),
+          sha256: base64url.encode(SHA256.digest()),
+          uploadCompletedAt: now,
+          mimetype: "application/octet-stream", //FIXME
+          width: 0xDEADBEEF, //FIXME
+          height: 0xDEADBEEF, //FIXME
+        });
+      });
+    });
+  }
+
   getUpload(id: CUID) {
     return this.s3.getObject({ Bucket: this.uploadBucket, Key: id }, undefined);
+  }
+
+  /**
+   * Read an already created object from S3 to calculate its metadata.
+   * Especially useful to process Pre-signed URL client uploads.
+   * @param cuid The upload S3-key
+   */
+  async calculateMetadataFromUpload(cuid: CUID): Promise<ImageBlobData> {
+    let upload = await this.getUpload(cuid).promise();
+    // console.log("Got object", cuid, upload)
+    let readable = readableBody(upload.Body);
+    let meta = await this.streamMetadata(readable);
+    if (meta.size != upload.ContentLength) {
+      throw new Error(`Expected upload:${cuid} to be of size: ${meta.size}, but S3 size is: ${upload.ContentLength}`);
+    }
+    return { ...meta, uploadCompletedAt: upload.LastModified };
   }
 
   protected copyFromUploadBucket(cuid: string, eTag: string, key: S3ImageKey) {
@@ -365,63 +410,19 @@ export class ImageRepository {
     this.db = db;
   }
 
-  async streamMetadata(readable: Readable): Promise<ImageBlobData> {
-    let meter  = streamMeter(s3.imagePartSize) // Limit uploads to a single part. Ensures S3 ETags are always an MD5 hash
-    let SHA256 = createHash('SHA256')
-    let MD5    = createHash('MD5')
-    readable.on('data', (chunk) => {
-      // Don't expect wrapping above the definitions in readable.pipe() to just work, because NodeJS is shit.
-      // We can pipe after (!!!) defining the promise, but that's not less lines of code or less error prone.
-      meter.write(chunk)
-      SHA256.write(chunk)
-      MD5.write(chunk)
-    })
-    return new Promise((resolve, reject) => {
-      readable.on('error', reject) //TODO: Test if size limit rejects!
-      readable.on('end', () => {
-        let now = new Date();
-        now.setMilliseconds(0); //S3 stores Last-Modified with per-second precision
-        resolve({
-          size: meter.bytes,
-          md5: MD5.digest().toString("base64"),
-          sha256: base64url.encode(SHA256.digest()),
-          uploadCompletedAt: now,
-          mimetype: "application/octet-stream", //FIXME
-          width: 0xDEADBEEF, //FIXME
-          height: 0xDEADBEEF, //FIXME
-        });
-      });
-    });
-  }
-
-  /**
-   * Read an already created object from S3 to calculate its metadata.
-   * Especially useful to process Pre-signed URL client uploads.
-   * @param cuid The upload S3-key
-   */
-  async calculateMetadataFromUpload(cuid: CUID): Promise<ImageBlobData> {
-    let upload = await this.s3.getUpload(cuid).promise();
-    let readable = readableBody(upload.Body);
-    let meta = await this.streamMetadata(readable);
-    if (meta.size != upload.ContentLength) {
-      throw new Error(`Expected upload:${cuid} to be of size: ${meta.size}, but S3 size is: ${upload.ContentLength}`);
-    }
-    return {...meta, uploadCompletedAt: upload.LastModified};
-  }
-
   async createFrom(body: Body, name: string): Promise<Image> {
     const id = scuid()
     let readable = readableBody(body)
 
     //1. Stream body to temporary upload bucket, while calculating SHA-256 and metadata
-    let metadata = this.streamMetadata(readable)
+    let metadata = s3.streamMetadata(readable)
     let uploadResult = await this.s3.upload(id, readable).promise()
     let uploadCompleted = new Date(); //<-- Can't get from S3 PUT response???
 
     //2. Check the upload was successful
     //TODO: test what happens when size limit was reached during upload
     let imageBlobData = await metadata
-    let {md5} = imageBlobData
+    let { md5 } = imageBlobData
     if (md5 != uploadResult.ETag) {
       // S3's ETag will be a MD5 hash only in certain cases, e.g. no server-side encryption and size below 5GB.
       // See docs for details: https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPUT.html
@@ -429,7 +430,8 @@ export class ImageRepository {
     }
 
     //3. Add a record to reference table to ensure the upload is eventually moved to the images bucket
-    let imageRef: S3ReferenceItem = {...imageBlobData,
+    let imageRef: S3ReferenceItem = {
+      ...imageBlobData,
       uploadCompletedAt: uploadCompleted,
       images: [id],
       lastFileName: name
