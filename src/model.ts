@@ -203,17 +203,17 @@ export class S3ImageRepositoryBuckets {
 /*---------------
   DynamoDB Tables
 -----------------*/
-export const object_to_updateItemInput = (tableName: string, key: DynamoDB.DocumentClient.Key, SET: object, ADD?: object, DELETE?: object): DynamoDB.DocumentClient.UpdateItemInput => {
+export const object_to_updateItemInput = (tableName: string, key: DynamoDB.DocumentClient.Key, SET?: object, ADD?: object, DELETE?: object): DynamoDB.DocumentClient.UpdateItemInput => {
   var expr: string = "";
   let values = {};
   for (const keyName in SET) {
     if (SET.hasOwnProperty(keyName)) {
       const ifNotExists = keyName.startsWith("?")
       const key = ifNotExists ? keyName.substr(1) : keyName;
-      const setAttr = ifNotExists ? "if_not_exists(" + key + ", :" + key + ")" : key + " = :" + key
+      const setAttr = ifNotExists ? key + " = if_not_exists(" + key + ", :" + key + ")" : key + " = :" + key
       if ("" === expr) expr = "SET "; else expr += ", "
       expr += setAttr;
-      const value = SET[key];
+      const value = SET[keyName];
       values[":" + key] = value;
     }
   }
@@ -235,28 +235,39 @@ export class DynamoDBImageRepositoryTables {
     this.db = dynamoDb;
   }
 
-  addReference(imageRef: S3ReferenceItem) {
+  async _updateReferenceItem(sha256: string, SET?, ADD?, DELETE?): Promise<S3ReferenceItem> {
+    let params = object_to_updateItemInput(S3REFS_TABLE, { "sha256": sha256 }, SET, ADD, DELETE);
+    params.ReturnValues = "UPDATED_NEW"
+    // console.log("About to update", params, "with", params.UpdateExpression)
+    let { Attributes } = await this.db.update(params).promise();
+    return {
+      sha256: sha256,
+      mimetype: Attributes.mimetype,
+      md5: Attributes.md5,
+      uploadCompletedAt: new Date(Attributes.uploadCompletedAt),
+      size: Attributes.size,
+      width: Attributes.width,
+      height: Attributes.height,
+      images: Attributes.images.values,
+      lastFileName: Attributes.lastFileName
+    }
+  }
+
+  async addReferences(imageRef: S3ReferenceItem) {
     let { sha256, images, uploadCompletedAt, ...attributes } = imageRef
-    let params = object_to_updateItemInput(S3REFS_TABLE, { "sha256": sha256 },
-      { ...attributes, uploadCompletedAt: uploadCompletedAt.toISOString() },
+    return this._updateReferenceItem(
+      sha256,
+      { ...attributes, "?uploadCompletedAt": uploadCompletedAt.toISOString() },
       { images: this.db.createSet(images) }
     );
-    // console.log("About to update", imageRef, "with", params.UpdateExpression)
-    params.ReturnValues = "ALL_NEW"
-    params.ReturnConsumedCapacity = "TOTAL"
-    params.ReturnItemCollectionMetrics = "SIZE"
-    return this.db.update(params)
   }
 
   getReferenceItem(sha256: URL_Safe_Base64_SHA256, consistentRead = true) {
     return this.db.get({ TableName: S3REFS_TABLE, Key: { "sha256": sha256 }, ConsistentRead: consistentRead })
   }
 
-  removeReferences(sha256: URL_Safe_Base64_SHA256, refs: CUID[]) {
-    let params = object_to_updateItemInput(S3REFS_TABLE, { sha256: sha256 }, undefined, undefined, {
-      images: this.db.createSet(refs)
-    })
-    return this.db.update(params)
+  async removeReferences(sha256: URL_Safe_Base64_SHA256, refs: CUID[]) {
+    return this._updateReferenceItem(sha256, undefined, undefined, { images: this.db.createSet(refs) })
   }
 
   deleteReferenceItem(sha256: URL_Safe_Base64_SHA256) {
@@ -467,13 +478,12 @@ export class ImageRepository {
     }
 
     //3. Add a record to reference table to ensure the upload is eventually moved to the images bucket
-    let imageRef: S3ReferenceItem = {
+    let imageRef: S3ReferenceItem = await this.db.addReferences({
       ...imageBlobData,
       uploadCompletedAt: uploadCompleted,
       images: [id],
       lastFileName: name
-    };
-    await this.db.addReferences(imageRef);
+    });
 
     //4. Don't just wait for DynamoDB Streams handler, start the move process immediately!
     //   Create (or Update) an Image DynamoDB item using the S3-reference

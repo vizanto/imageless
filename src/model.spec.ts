@@ -150,19 +150,17 @@ describe('DynamoDB ImageRepository Table operations', () => {
 
     it('should support adding one or more references', async () => {
       // Create the fake reference
-      let addRef = db.addReferences(imageRef)
-      let result = await addRef.promise()
-      expect(result.ConsumedCapacity.CapacityUnits).toBe(1)
+      let result = await db.addReferences(imageRef)
+      expect(result).toStrictEqual(imageRef)
       // Ensure key does now exist
       let expectedImageRef = { ...imageRef, uploadCompletedAt: imageRef.uploadCompletedAt.toISOString() }
       let storedRefs = await db.getReferenceItem(sha).promise()
       expect({ ...storedRefs.Item, images: storedRefs.Item.images.values }).toMatchObject(expectedImageRef);
       // Add another ref
       let imageRef2 = { ...imageRef, images: [imageID2] } // Only 1 imageID, it should merge with (add to) `images` set
-      let updateResult = await db.addReferences(imageRef2).promise()
-      expect(updateResult.ConsumedCapacity.CapacityUnits).toBe(1)
+      let updateResult = await db.addReferences(imageRef2)
       // Check update result included the new set
-      expect(updateResult.Attributes.images.values).toStrictEqual([imageID, imageID2])
+      expect(updateResult).toStrictEqual({ ...imageRef2, images: [imageID, imageID2] })
       // Ensure imageID was added to set
       let { Item: { images, ...updatedItem } } = await db.getReferenceItem(sha).promise()
       expect({ ...updatedItem, images: undefined }).toMatchObject({ ...expectedImageRef, images: undefined });
@@ -178,9 +176,10 @@ describe('DynamoDB ImageRepository Table operations', () => {
 
     it('should support removing one or more references', async () => {
       // Delete the first test reference and ensure it is removed
-      await db.removeReferences(sha, [imageID]).promise();
+      let { images } = await db.removeReferences(sha, [imageID]);
+      expect(images).toStrictEqual([imageID2]);
       let { Item } = await db.getReferenceItem(sha).promise()
-      expect(Item.images.values).toStrictEqual([imageID2]);
+      expect(Item.images.values).toStrictEqual(images);
     })
 
     it('should support removing reference items', async () => {
