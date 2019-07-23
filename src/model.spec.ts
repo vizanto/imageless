@@ -174,6 +174,20 @@ describe('DynamoDB ImageRepository Table operations', () => {
       expect(storedRefs.Item.images).not.toBeNull();
     })
 
+    it('should FAIL when S3-key and checksum related ImageBlobData for a reference changes', async () => {
+      expect(db.addReferences({ ...imageRef, md5: "bogus" })).rejects.toMatchObject({ message: "The conditional request failed" })
+      expect(db.addReferences({ ...imageRef, size: 1234 })).rejects.toMatchObject({ message: "The conditional request failed" })
+      expect(db.addReferences({ ...imageRef, mimetype: "text/plain" })).rejects.toMatchObject({ message: "The conditional request failed" })
+      expect(db.addReferences({ ...imageRef, width: 1337 })).resolves.toMatchObject({ width: 1337 })
+    });
+
+    it('should keep the first stored `uploadCompleteAt` timestamp', async () => {
+      let updateResult = await db.addReferences({ ...imageRef, height: 1337, uploadCompletedAt: new Date(2019, 7, 23) })
+      expect(updateResult.uploadCompletedAt).toEqual(imageRef.uploadCompletedAt)
+      expect(imageRef.height).not.toBe(1337)
+      expect(updateResult.height).toBe(1337)
+    });
+
     it('should support removing one or more references', async () => {
       // Delete the first test reference and ensure it is removed
       let { images } = await db.removeReferences(sha, [imageID]);

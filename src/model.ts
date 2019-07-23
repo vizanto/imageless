@@ -238,6 +238,13 @@ export class DynamoDBImageRepositoryTables {
   async _updateReferenceItem(sha256: string, SET?, ADD?, DELETE?): Promise<S3ReferenceItem> {
     let params = object_to_updateItemInput(S3REFS_TABLE, { "sha256": sha256 }, SET, ADD, DELETE);
     params.ReturnValues = "UPDATED_NEW"
+    if (SET) {
+      if (SET.md5 && SET.size && SET.mimetype) {
+        params.ConditionExpression = '(attribute_not_exists(md5) OR md5 = :md5) AND (attribute_not_exists(size) OR size = :size) AND (attribute_not_exists(mimetype) OR mimetype = :mimetype)';
+      } else if (SET.md5 || SET.size || SET.mimetype) {
+        throw new Error('Invalid S3ReferenceItem update: ' + SET);
+      }
+    }
     // console.log("About to update", params, "with", params.UpdateExpression)
     let { Attributes } = await this.db.update(params).promise();
     return {
