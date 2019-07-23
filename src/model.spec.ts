@@ -216,5 +216,11 @@ describe('DynamoDB ImageRepository Table operations', () => {
       console.log(result)
       expect(result.image).toMatchObject(input)
     });
+
+    it('should support deleting an Image', async () => {
+      let result = await db.deleteImageItem(cuid).promise()
+      expect(result).not.toBeNull()
+      //TODO: Update Collections in DynamoDB Streams handler
+    });
   })
 })

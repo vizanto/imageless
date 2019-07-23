@@ -329,6 +329,10 @@ export class DynamoDBImageRepositoryTables {
     });
     return this._updateImageItem(cuid, returnImage? "ALL_NEW" : "NONE", input);
   }
+
+  deleteImageItem(cuid: CUID) {
+    return this.db.delete({ TableName: IMAGES_TABLE, Key: { "cuid": cuid } })
+  }
 }
 
 
