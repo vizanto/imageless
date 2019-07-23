@@ -49,6 +49,7 @@ describe('S3 operations', () => {
     expect(imageComputed.sha256).toEqual(notImageSHA256)
     expect(imageMeta.sha256).toEqual(notImageSHA256)
     expect(imageMeta).toEqual(imageComputed)
+    expect(`"${imageMeta.md5}"`).toEqual(notImageETag)
 
     // Cleanup after above tests
     await s3.deleteFromUploadBucket(id).promise()
@@ -60,7 +61,8 @@ describe('S3 operations', () => {
       const id = 'some-upload-to-be-moved'
       const data = 'This is not an image'
       const image = { sha256: 'not really a hash', mimetype: 'application/octet-stream' }
-      await s3.upload(id, data).promise()
+      let uploadResult = await s3.upload(id, data).promise()
+      expect(uploadResult.ETag).toBe(notImageETag)
       let { awsResults: { s3Copy } } = await s3.moveUploadToImageBucket(id, notImageETag, image, async () => {
         let uploaded = await s3.getUpload(id).promise()
         expect(uploaded.ETag).toBe(notImageETag) // Check the upload still exists

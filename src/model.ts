@@ -13,7 +13,7 @@ var scuid: () => string = require('scuid');
 ------------*/
 type CUID = string
 type URL_Safe_Base64_SHA256 = string
-type Base64_MD5 = string
+type Base16_MD5 = string
 
 export const mimetypeFileExtension = {
   "image/png":  ".png",
@@ -21,22 +21,20 @@ export const mimetypeFileExtension = {
   "image/gif":  ".gif"
 }
 
-export interface ImageBlobData {
+export interface S3ImageKey {
   sha256: URL_Safe_Base64_SHA256
-  md5: Base64_MD5
+  mimetype: string
+}
+export interface ImageBlobData extends S3ImageKey {
+  md5: Base16_MD5
   uploadCompletedAt: Date
   size: number
-  mimetype: string
   width: number
   height: number
 }
 export interface S3ReferenceItem extends ImageBlobData {
   images: CUID[];
   lastFileName: string;
-}
-export interface S3ImageKey {
-  sha256: URL_Safe_Base64_SHA256
-  mimetype: string
 }
 export interface ImageInput extends ImageBlobData {
   name: string
@@ -109,7 +107,7 @@ export class S3ImageRepositoryBuckets {
         now.setMilliseconds(0); //S3 stores Last-Modified with per-second precision
         resolve({
           size: meter.bytes,
-          md5: MD5.digest().toString("base64"),
+          md5: MD5.digest().toString("hex"),
           sha256: base64url.encode(SHA256.digest()),
           uploadCompletedAt: now,
           mimetype: "application/octet-stream", //FIXME
@@ -153,7 +151,7 @@ export class S3ImageRepositoryBuckets {
   /**
    * Moves an upload to image bucket
    * @param cuid uploaded object (source)
-   * @param eTag checksum
+   * @param eTag checksum by S3, usually Base16 MD5 String wrapped in double quotes (")
    * @param image destination
    * @param onImageReady called as soon as object in image bucket exists, usually to Create or Update an Image DynamoDB item for this upload
    */

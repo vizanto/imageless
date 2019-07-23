@@ -12,5 +12,5 @@
     "IS_OFFLINE": "true",
     "PATH": "${workspaceRoot}/.bin:${env:PATH}"
   },
-  "jest.pathToJest": "env IS_OFFLINE=true ./node_modules/jest/bin/jest.js"
+  "jest.pathToJest": "env IS_OFFLINE=true S3REFS_TABLE=S3Refs-dev IMAGES_TABLE=Images-dev COLLECTIONS_TABLE=Collections-dev ./node_modules/jest/bin/jest.js"
 }
