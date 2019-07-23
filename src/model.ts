@@ -36,18 +36,18 @@ export interface S3ReferenceItem extends ImageBlobData {
   lastFileName: string;
 }
 export interface ImageInput extends ImageBlobData {
-  name: string
+  title: string
 }
 export interface Image extends ImageBlobData {
   cuid: CUID
   createdAt: Date
   collections?: CUID[]
-  name: string
-  s3url: string
+  title: string
+  s3url?: string
 }
 export interface CollectionItem {
   cuid: CUID;
-  name: string;
+  title: string;
   images: CUID[];
 }
 
@@ -281,6 +281,34 @@ export class DynamoDBImageRepositoryTables {
     return this.db.delete({ TableName: S3REFS_TABLE, Key: { "sha256": sha256 } })
   }
 
+  async _updateImageItem(cuid: string, returnValues: "ALL_NEW" | "NONE", input) {
+    let params = object_to_updateItemInput(IMAGES_TABLE, { "cuid": cuid }, input);
+    params.ReturnValues = returnValues
+    params.ConditionExpression = '(attribute_not_exists(sha256) OR sha256 = :sha256)'
+    let result = await this.db.update(params).promise();
+    let { Attributes } = result;
+    if (Attributes) {
+      let image: Image = {
+        sha256: Attributes.sha256,
+        mimetype: Attributes.mimetype,
+        md5: Attributes.md5,
+        uploadCompletedAt: new Date(Attributes.uploadCompletedAt),
+        size: Attributes.size,
+        width: Attributes.width,
+        height: Attributes.height,
+        cuid: cuid,
+        createdAt: new Date(Attributes.createdAt),
+        title: Attributes.title
+      }
+      if (Attributes.collections) {
+        image.collections = Attributes.collections.values;
+      }
+      return { image: image, dbResult: result };
+    } else {
+      return { dbResult: result };
+    }
+  }
+
   /**
    * Creates a new Image item,
    *  or if it exists but has a different SHA-256 assigned to it: replaces its ImageBlobData attributes.
@@ -289,8 +317,9 @@ export class DynamoDBImageRepositoryTables {
    *
    * @param cuid Image ID
    * @param input Image item attributes, requires sha256 and all S3-object related properties
+   * @param returnImage true: return the updated Image, false: resolve Promise to null
    */
-  createImage(cuid: string, newImage: Readonly<ImageInput>, creationTimestamp: Date | "now") {
+  async createImage(cuid: string, newImage: Readonly<ImageInput>, creationTimestamp: Date | "now", returnImage = true) {
     let { uploadCompletedAt } = newImage;
     let createdAt = (creationTimestamp == "now" ? new Date() : creationTimestamp)
     let input = Object.freeze({
@@ -298,18 +327,7 @@ export class DynamoDBImageRepositoryTables {
       "?createdAt": createdAt.toUTCString(),
       uploadCompletedAt: uploadCompletedAt.toUTCString(),
     });
-    let params = object_to_updateItemInput(IMAGES_TABLE, { "cuid": { "S": cuid } }, input);
-    params.ConditionExpression = 'sha256 != :sha256'
-    // Construct an Image object from the database input, excluding ?createdAt
-    // See also: https://stackoverflow.com/questions/34698905/clone-a-js-object-except-for-one-key
-    const image: Image = (({ '?createdAt': string, ...imageData }) => ({
-      ...imageData,
-      cuid: cuid,
-      createdAt: createdAt,
-      uploadCompletedAt: uploadCompletedAt,
-      s3url: s3.urlOf(newImage)
-    }))(input);
-    return { image: Object.freeze(image), dbParams: params, dbUpdateResult: this.db.update(params) };
+    return this._updateImageItem(cuid, returnImage? "ALL_NEW" : "NONE", input);
   }
 }
 
@@ -339,31 +357,32 @@ export class ImageRepository_DynamoDB_StreamHandler {
 
   async _moveUploadAndCreateImageItem(cuid: string, newImage: ImageInput) {
     // Prepare to Create (or Update) an Image DynamoDB item using the S3-reference
-    let createImage = () => this.db.createImage(cuid, newImage, "now").dbUpdateResult.promise();
+    let createImage = () => this.db.createImage(cuid, newImage, "now", false);
     // Move the S3 object from upload to image bucket
     let moveOp = await this.s3.moveUploadToImageBucket(cuid, newImage.md5, newImage, createImage);
     // Success!
     return {
-      awsResults: { ...moveOp.awsResults, dbUpdate: moveOp.afterCopyCompleted },
-      image: null
+      awsResults: moveOp.awsResults,
+      image: moveOp.afterCopyCompleted
     }
   }
 
   async _concurrentMoveUploadsAndCreateImageItems(cuids: string[], sha256: string, newImage: DynamoDBStreams.AttributeMap): AWSPromises {
     let jobs: Promise<AWSCompositeOp>[] = [];
     for (const cuid of cuids) {
-      jobs.push(this._moveUploadAndCreateImageItem(cuid, {
+      let input: ImageInput = {
         sha256: sha256,
         md5: newImage.md5.S,
         uploadCompletedAt: new Date(newImage.uploadCompletedAt.S),
 
-        name: newImage.lastFileName.S,
+        title: newImage.lastFileName.S,
         size: parseInt(newImage.size.N),
         mimetype: newImage.mimetype.S,
 
         width: parseInt(newImage.width.N),
         height: parseInt(newImage.height.N)
-      }));
+      }
+      jobs.push(this._moveUploadAndCreateImageItem(cuid, input));
     }
     return Promise.all(jobs)
       .then(job => job.reduce((array: AWSResults, result) => array.concat(Object.values(result.awsResults)), []))
@@ -494,14 +513,9 @@ export class ImageRepository {
 
     //4. Don't just wait for DynamoDB Streams handler, start the move process immediately!
     //   Create (or Update) an Image DynamoDB item using the S3-reference
-    let image: Image;
-    let createImage = () => {
-      let result = this.db.createImage(id, { ...imageRef, name: imageRef.lastFileName }, "now");
-      image = result.image;
-      return result.dbUpdateResult.promise();
-    }
-    await this.s3.moveUploadToImageBucket(id, md5, imageRef, createImage);
-    return image;
+    let createImage = () => this.db.createImage(id, { ...imageRef, title: imageRef.lastFileName }, "now", true);
+    let moveResult = await this.s3.moveUploadToImageBucket(id, md5, imageRef, createImage);
+    return moveResult.afterCopyCompleted.image;
   }
 }
 

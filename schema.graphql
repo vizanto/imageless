@@ -42,8 +42,8 @@ type Image {
   uploadCompletedAt: UTC_DateTime!
 
   # File metadata
-  name: String
-  blob: URL! # Not actually stored in DynamoDB as it can be constructed from `name` and `mimetype`
+  title: String
+  blob: URL! # Not actually stored in DynamoDB as it can be constructed from `sha256` and `mimetype`
   size: Int!
   mimetype: String!
   
@@ -54,7 +54,7 @@ type Image {
 
 type Collection {
   cuid: CUID!
-  name: String!
+  title: String!
   createdAt: UTC_DateTime!
   lastModifiedAt: UTC_DateTime!
   images: [Image!]
@@ -69,16 +69,16 @@ type Query {
   
   # Collections of images
   collection(id: ID!): Collection
-  collections(ids: [ID!], names: [String]): [Collection!]!
+  collections(ids: [ID!], titles: [String]): [Collection!]!
 }
 
 type Mutation {
   # Create
-  uploadImage(blob: File!, id: ID, name: String, collections: [ID!])
-  createCollection(name: String!, images: [ID!], id: ID)
+  uploadImage(blob: File!, id: ID, title: String, collections: [ID!])
+  createCollection(title: String!, images: [ID!], id: ID)
   
   # Update
-  updateImage(id: ID!, name: String, collections: [ID!])
+  updateImage(id: ID!, title: String, collections: [ID!])
   addImageToCollections(collections: [ID!]!)
   removeImageFromCollections(collections: [ID!]!)
   

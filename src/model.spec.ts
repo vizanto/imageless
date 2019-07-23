@@ -1,6 +1,7 @@
 import { s3, readableBody, IS_OFFLINE, S3ImageKey, db, S3ReferenceItem } from './model'
 import * as getStream from 'get-stream'
 import base64url from 'base64url';
+var scuid: () => string = require('scuid');
 
 /*-------
   Helpers
@@ -202,5 +203,17 @@ describe('DynamoDB ImageRepository Table operations', () => {
       let item = await db.getReferenceItem(sha).promise()
       expect(item).toStrictEqual({});
     })
+  })
+
+  describe('for `Image` create/read/update/delete (CRUD) functionality', () => {
+    const cuid = scuid()
+
+    it('should support creating an Image', async () => {
+      let { images, lastFileName, ...imageInput } = imageRef;
+      let input = { ...imageInput, title: lastFileName, uploadCompletedAt: new Date(2019, 7, 23) };
+      let result = await db.createImage(cuid, input, "now")
+      console.log(result)
+      expect(result.image).toMatchObject(input)
+    });
   })
 })
