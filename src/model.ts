@@ -164,7 +164,7 @@ export class S3ImageRepositoryBuckets {
       if (reason.statusCode == 404) {
         try {
           // Check if the intended destination exists
-          let headResult = await s3.headImage(image).promise();
+          let headResult = await this.headImage(image).promise();
           // It exists! Continue as if upload was copied...
           return {
             awsResults: { s3Head: headResult },
@@ -402,7 +402,7 @@ export class ImageRepository_DynamoDB_StreamHandler {
         return this._concurrentMoveUploadsAndCreateImageItems(newImage.images.SS, sha256, newImage)
       case "REMOVE":
         // Delete from S3 when all references to an S3-object are removed from DynamoDB
-        let deleteOp = s3.deleteUnreferencedImage({ sha256: sha256, mimetype: record.OldImage.mimetype.S }).promise()
+        let deleteOp = this.s3.deleteUnreferencedImage({ sha256: sha256, mimetype: record.OldImage.mimetype.S }).promise()
         return deleteOp.then(r => [r])
       case "MODIFY":
         // Synchronize changes to S3-references items with actual S3 storage
@@ -489,7 +489,7 @@ export class ImageRepository {
     let readable = readableBody(body)
 
     //1. Stream body to temporary upload bucket, while calculating SHA-256 and metadata
-    let metadata = s3.streamMetadata(readable)
+    let metadata = this.s3.streamMetadata(readable)
     let uploadResult = await this.s3.upload(id, readable).promise()
     let uploadCompleted = new Date(); //<-- Can't get from S3 PUT response???
 
@@ -524,7 +524,7 @@ export class ImageRepository {
   Default Image Repository
 --------------------------*/
 export const IS_OFFLINE = process.env.IS_OFFLINE === 'true';
-export const s3 = new S3ImageRepositoryBuckets(
+const default_s3 = new S3ImageRepositoryBuckets(
   new S3(IS_OFFLINE ? {
     region: 'eu-central-1',
     s3ForcePathStyle: true,
@@ -533,7 +533,7 @@ export const s3 = new S3ImageRepositoryBuckets(
     endpoint: 'http://localhost:4572'
   } : {})
 );
-export const db = new DynamoDBImageRepositoryTables(
+const default_db = new DynamoDBImageRepositoryTables(
   new DynamoDB.DocumentClient(
     IS_OFFLINE ? {
       region: 'eu-central-1',
@@ -542,7 +542,8 @@ export const db = new DynamoDBImageRepositoryTables(
       endpoint: 'http://localhost:8000'
     } : {})
 );
-export const images = new ImageRepository(s3, db);
-export const stream = new ImageRepository_DynamoDB_StreamHandler(s3, db);
+export const defaultStores = { s3: default_s3, db: default_db };
+export const images = new ImageRepository(default_s3, default_db);
+export const stream = new ImageRepository_DynamoDB_StreamHandler(default_s3, default_db);
 
 console.log(COLLECTIONS_TABLE); // Make TypeScript shut up about unused reference for now

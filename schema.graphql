@@ -43,7 +43,7 @@ type Image {
 
   # File metadata
   title: String
-  blob: URL! # Not actually stored in DynamoDB as it can be constructed from `sha256` and `mimetype`
+  s3url: URL! # Not actually stored in DynamoDB as it can be constructed from `sha256` and `mimetype`
   size: Int!
   mimetype: String!
   

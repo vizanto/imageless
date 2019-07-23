@@ -1,6 +1,7 @@
-import { s3, readableBody, IS_OFFLINE, S3ImageKey, db, S3ReferenceItem } from './model'
+import { defaultStores, readableBody, IS_OFFLINE, S3ImageKey, S3ReferenceItem } from './model'
 import * as getStream from 'get-stream'
 import base64url from 'base64url';
+const { s3, db } = defaultStores
 var scuid: () => string = require('scuid');
 
 /*-------
