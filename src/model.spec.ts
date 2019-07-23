@@ -122,47 +122,72 @@ describe('S3 operations', () => {
 });
 
 describe('DynamoDB ImageRepository Table operations', () => {
+  const imageID = 'ref-' + Math.random()
+  const imageID2 = 'ref2-' + Math.random()
+  const sha = notImageSHA256
+  let now = new Date()
+  let imageRef: S3ReferenceItem = {
+    sha256: sha,
+    md5: notImageETag,
+    mimetype: 'application/octet-stream',
+    size: notImageData.length,
+    width: 123,
+    height: 456,
+    uploadCompletedAt: now,
+    images: [imageID],
+    lastFileName: 'not-an-image.txt'
+  }
 
   describe('for managing references to content-addressable de-duplicated S3 objects', () => {
-    it('should support adding a reference', async () => {
-      const id = 'ref-' + Math.random()
-      const sha = /* id + */ notImageSHA256
-      // Ensure key does not exist
+
+    it('should not crash when deleting a non-existent reference item', async () => {
+      // Ensure key does not exist, deleting it twice
       await db.deleteReferenceItem(sha).promise();
-      let existingRefs = await db.getReferences(sha).promise()
+      await db.deleteReferenceItem(sha).promise();
+      let existingRefs = await db.getReferenceItem(sha).promise()
       expect(existingRefs).toStrictEqual({});
+    });
+
+    it('should support adding one or more references', async () => {
       // Create the fake reference
-      let now = new Date()
-      let imageRef: S3ReferenceItem = {
-        sha256: sha,
-        md5: notImageETag,
-        mimetype: 'application/octet-stream',
-        size: notImageData.length,
-        width: 123,
-        height: 456,
-        uploadCompletedAt: now,
-        images: [id],
-        lastFileName: 'not-an-image.txt'
-      }
-      let addRef = db.addReference(imageRef)
+      let addRef = db.addReferences(imageRef)
       let result = await addRef.promise()
       expect(result.ConsumedCapacity.CapacityUnits).toBe(1)
       // Ensure key does now exist
       let expectedImageRef = { ...imageRef, uploadCompletedAt: imageRef.uploadCompletedAt.toISOString() }
-      let storedRefs = await db.getReferences(sha).promise()
+      let storedRefs = await db.getReferenceItem(sha).promise()
       expect({ ...storedRefs.Item, images: storedRefs.Item.images.values }).toMatchObject(expectedImageRef);
       // Add another ref
-      const id2 = 'ref2-' + Math.random()
-      let imageRef2 = { ...imageRef, images: [id2] } // Only 1 id, it should merge with (add to) `images` set
-      let updateResult = await db.addReference(imageRef2).promise()
+      let imageRef2 = { ...imageRef, images: [imageID2] } // Only 1 imageID, it should merge with (add to) `images` set
+      let updateResult = await db.addReferences(imageRef2).promise()
       expect(updateResult.ConsumedCapacity.CapacityUnits).toBe(1)
       // Check update result included the new set
-      expect(updateResult.Attributes.images.values).toStrictEqual([id, id2])
-      // Ensure id was added to set
-      let { Item: { images, ...updatedItem } } = await db.getReferences(sha).promise()
+      expect(updateResult.Attributes.images.values).toStrictEqual([imageID, imageID2])
+      // Ensure imageID was added to set
+      let { Item: { images, ...updatedItem } } = await db.getReferenceItem(sha).promise()
       expect({ ...updatedItem, images: undefined }).toMatchObject({ ...expectedImageRef, images: undefined });
       let receivedImageSet: string[] = images.values
-      expect(receivedImageSet).toStrictEqual([id, id2])
+      expect(receivedImageSet).toStrictEqual([imageID, imageID2])
+    })
+
+    it('should support getting reference items', async () => {
+      // Ensure key exists (from previous test)
+      let storedRefs = await db.getReferenceItem(sha).promise()
+      expect(storedRefs.Item.images).not.toBeNull();
+    })
+
+    it('should support removing one or more references', async () => {
+      // Delete the first test reference and ensure it is removed
+      await db.removeReferences(sha, [imageID]).promise();
+      let { Item } = await db.getReferenceItem(sha).promise()
+      expect(Item.images.values).toStrictEqual([imageID2]);
+    })
+
+    it('should support removing reference items', async () => {
+      // Delete the test reference and ensure it is removed
+      await db.deleteReferenceItem(sha).promise();
+      let item = await db.getReferenceItem(sha).promise()
+      expect(item).toStrictEqual({});
     })
   })
 })

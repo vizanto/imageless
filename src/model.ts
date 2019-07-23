@@ -203,7 +203,7 @@ export class S3ImageRepositoryBuckets {
 /*---------------
   DynamoDB Tables
 -----------------*/
-export const object_to_updateItemInput = (tableName: string, key: DynamoDB.DocumentClient.Key, SET: object, ADD?: object, REMOVE?: object): DynamoDB.DocumentClient.UpdateItemInput => {
+export const object_to_updateItemInput = (tableName: string, key: DynamoDB.DocumentClient.Key, SET: object, ADD?: object, DELETE?: object): DynamoDB.DocumentClient.UpdateItemInput => {
   var expr: string = "";
   let values = {};
   for (const keyName in SET) {
@@ -220,8 +220,8 @@ export const object_to_updateItemInput = (tableName: string, key: DynamoDB.Docum
   if (ADD) {
     expr += " ADD " + Object.keys(ADD).map(k => { values[":" + k] = ADD[k]; return k + " :" + k; }).join(", ")
   }
-  if (REMOVE) {
-    expr += " REMOVE " + Object.keys(REMOVE).map(k => { values[":" + k] = REMOVE[k]; return k + " :" + k; }).join(", ")
+  if (DELETE) {
+    expr += " DELETE " + Object.keys(DELETE).map(k => { values[":" + k] = DELETE[k]; return k + " :" + k; }).join(", ")
   }
   return { TableName: tableName, Key: key, UpdateExpression: expr, ExpressionAttributeValues: values }
 }
@@ -248,8 +248,15 @@ export class DynamoDBImageRepositoryTables {
     return this.db.update(params)
   }
 
-  getReferences(sha256: URL_Safe_Base64_SHA256, consistentRead = true) {
+  getReferenceItem(sha256: URL_Safe_Base64_SHA256, consistentRead = true) {
     return this.db.get({ TableName: S3REFS_TABLE, Key: { "sha256": sha256 }, ConsistentRead: consistentRead })
+  }
+
+  removeReferences(sha256: URL_Safe_Base64_SHA256, refs: CUID[]) {
+    let params = object_to_updateItemInput(S3REFS_TABLE, { sha256: sha256 }, undefined, undefined, {
+      images: this.db.createSet(refs)
+    })
+    return this.db.update(params)
   }
 
   deleteReferenceItem(sha256: URL_Safe_Base64_SHA256) {
@@ -466,7 +473,7 @@ export class ImageRepository {
       images: [id],
       lastFileName: name
     };
-    await this.db.addReference(imageRef);
+    await this.db.addReferences(imageRef);
 
     //4. Don't just wait for DynamoDB Streams handler, start the move process immediately!
     //   Create (or Update) an Image DynamoDB item using the S3-reference
