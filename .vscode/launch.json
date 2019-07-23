@@ -13,6 +13,9 @@
       ],
       "env": {
         "PATH": "${workspaceFolder}/.bin",
+        "S3REFS_TABLE": "S3Refs-dev",
+        "IMAGES_TABLE": "Images-dev",
+        "COLLECTIONS_TABLE": "Collections-dev",
         "IS_OFFLINE": "true",
       },
       "cwd": "${workspaceFolder}",

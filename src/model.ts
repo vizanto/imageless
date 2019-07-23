@@ -1,5 +1,4 @@
 import { S3, DynamoDBStreams, DynamoDB, AWSError } from "aws-sdk";
-import { Key } from "aws-sdk/clients/dynamodb";
 import { PromiseResult } from "aws-sdk/lib/request";
 import { Body } from "aws-sdk/clients/s3";
 import { createHash } from "crypto";
@@ -204,19 +203,25 @@ export class S3ImageRepositoryBuckets {
 /*---------------
   DynamoDB Tables
 -----------------*/
-export const object_to_updateItemInput = (tableName: string, key: Key, input: object): DynamoDB.UpdateItemInput => {
-  var expr: string = null;
+export const object_to_updateItemInput = (tableName: string, key: DynamoDB.DocumentClient.Key, SET: object, ADD?: object, REMOVE?: object): DynamoDB.DocumentClient.UpdateItemInput => {
+  var expr: string = "";
   let values = {};
-  for (const keyName in input) {
-    if (input.hasOwnProperty(keyName)) {
+  for (const keyName in SET) {
+    if (SET.hasOwnProperty(keyName)) {
       const ifNotExists = keyName.startsWith("?")
       const key = ifNotExists ? keyName.substr(1) : keyName;
       const setAttr = ifNotExists ? "if_not_exists(" + key + ", :" + key + ")" : key + " = :" + key
-      if (expr == null) expr = "SET "; else expr += ", "
+      if ("" === expr) expr = "SET "; else expr += ", "
       expr += setAttr;
-      const value = input[key];
+      const value = SET[key];
       values[":" + key] = value;
     }
+  }
+  if (ADD) {
+    expr += " ADD " + Object.keys(ADD).map(k => { values[":" + k] = ADD[k]; return k + " :" + k; }).join(", ")
+  }
+  if (REMOVE) {
+    expr += " REMOVE " + Object.keys(REMOVE).map(k => { values[":" + k] = REMOVE[k]; return k + " :" + k; }).join(", ")
   }
   return { TableName: tableName, Key: key, UpdateExpression: expr, ExpressionAttributeValues: values }
 }
@@ -231,13 +236,24 @@ export class DynamoDBImageRepositoryTables {
   }
 
   addReference(imageRef: S3ReferenceItem) {
-    //TODO: INSERT OR UPDATE, SET ADD
-    //fixme: needs a set-type add !
-    return this.db.put({ TableName: S3REFS_TABLE, Item: imageRef })
+    let { sha256, images, uploadCompletedAt, ...attributes } = imageRef
+    let params = object_to_updateItemInput(S3REFS_TABLE, { "sha256": sha256 },
+      { ...attributes, uploadCompletedAt: uploadCompletedAt.toISOString() },
+      { images: this.db.createSet(images) }
+    );
+    // console.log("About to update", imageRef, "with", params.UpdateExpression)
+    params.ReturnValues = "ALL_NEW"
+    params.ReturnConsumedCapacity = "TOTAL"
+    params.ReturnItemCollectionMetrics = "SIZE"
+    return this.db.update(params)
   }
 
-  deleteReferences(key: string) {
-    return this.db.delete({ TableName: S3REFS_TABLE, Key: { "cuid": key } })
+  getReferences(sha256: URL_Safe_Base64_SHA256, consistentRead = true) {
+    return this.db.get({ TableName: S3REFS_TABLE, Key: { "sha256": sha256 }, ConsistentRead: consistentRead })
+  }
+
+  deleteReferenceItem(sha256: URL_Safe_Base64_SHA256) {
+    return this.db.delete({ TableName: S3REFS_TABLE, Key: { "sha256": sha256 } })
   }
 
   /**
@@ -352,7 +368,7 @@ export class ImageRepository_DynamoDB_StreamHandler {
         //-- Check for reference count changes
         // A. Empty set, no more references to S3. Delete the blob!
         if (newImageRef.length == 0) {
-          return this.db.deleteReferences(sha256).promise().then(r => [r])
+          return this.db.deleteReferenceItem(sha256).promise().then(r => [r])
           // The "REMOVE" event handler will clean up S3
         }
         // B. Set has grown, copy the uploaded file to long-term S3 bucket
@@ -483,6 +499,8 @@ export const db = new DynamoDBImageRepositoryTables(
   new DynamoDB.DocumentClient(
     IS_OFFLINE ? {
       region: 'eu-central-1',
+      accessKeyId: 'DEFAULT_ACCESS_KEY',
+      secretAccessKey: 'DEFAULT_SECRET',
       endpoint: 'http://localhost:8000'
     } : {})
 );

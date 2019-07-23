@@ -11,27 +11,6 @@
 //   };
 // }
 
-import * as AWS from 'aws-sdk'
-
-// --------------
-// DynamoDB setup
-const IMAGES_TABLE = process.env.IAMGES_TABLE;
-console.log(IMAGES_TABLE)
-
-const IS_OFFLINE = process.env.IS_OFFLINE;
-let dynamoDb;
-if (IS_OFFLINE === 'true') {
-  dynamoDb = new AWS.DynamoDB.DocumentClient({
-    region: 'localhost',
-    endpoint: 'http://localhost:8000'
-  })
-  console.log(dynamoDb);
-} else {
-  dynamoDb = new AWS.DynamoDB.DocumentClient();
-};
-
-//TODO: Use transactions with `list_append()` to update list of Images in Collection, and list of Collections in Image
-// https://aws.amazon.com/blogs/aws/new-amazon-dynamodb-transactions/
 
 // Maybe use DynamoDB as Event store?
 // https://medium.com/@domagojk/serverless-event-sourcing-in-aws-lambda-dynamodb-sqs-7237d79aed27

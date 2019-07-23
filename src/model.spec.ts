@@ -1,4 +1,4 @@
-import { s3, readableBody, IS_OFFLINE, S3ImageKey } from './model'
+import { s3, readableBody, IS_OFFLINE, S3ImageKey, db, S3ReferenceItem } from './model'
 import * as getStream from 'get-stream'
 import base64url from 'base64url';
 
@@ -120,3 +120,49 @@ describe('S3 operations', () => {
     });
   });
 });
+
+describe('DynamoDB ImageRepository Table operations', () => {
+
+  describe('for managing references to content-addressable de-duplicated S3 objects', () => {
+    it('should support adding a reference', async () => {
+      const id = 'ref-' + Math.random()
+      const sha = /* id + */ notImageSHA256
+      // Ensure key does not exist
+      await db.deleteReferenceItem(sha).promise();
+      let existingRefs = await db.getReferences(sha).promise()
+      expect(existingRefs).toStrictEqual({});
+      // Create the fake reference
+      let now = new Date()
+      let imageRef: S3ReferenceItem = {
+        sha256: sha,
+        md5: notImageETag,
+        mimetype: 'application/octet-stream',
+        size: notImageData.length,
+        width: 123,
+        height: 456,
+        uploadCompletedAt: now,
+        images: [id],
+        lastFileName: 'not-an-image.txt'
+      }
+      let addRef = db.addReference(imageRef)
+      let result = await addRef.promise()
+      expect(result.ConsumedCapacity.CapacityUnits).toBe(1)
+      // Ensure key does now exist
+      let expectedImageRef = { ...imageRef, uploadCompletedAt: imageRef.uploadCompletedAt.toISOString() }
+      let storedRefs = await db.getReferences(sha).promise()
+      expect({ ...storedRefs.Item, images: storedRefs.Item.images.values }).toMatchObject(expectedImageRef);
+      // Add another ref
+      const id2 = 'ref2-' + Math.random()
+      let imageRef2 = { ...imageRef, images: [id2] } // Only 1 id, it should merge with (add to) `images` set
+      let updateResult = await db.addReference(imageRef2).promise()
+      expect(updateResult.ConsumedCapacity.CapacityUnits).toBe(1)
+      // Check update result included the new set
+      expect(updateResult.Attributes.images.values).toStrictEqual([id, id2])
+      // Ensure id was added to set
+      let { Item: { images, ...updatedItem } } = await db.getReferences(sha).promise()
+      expect({ ...updatedItem, images: undefined }).toMatchObject({ ...expectedImageRef, images: undefined });
+      let receivedImageSet: string[] = images.values
+      expect(receivedImageSet).toStrictEqual([id, id2])
+    })
+  })
+})
