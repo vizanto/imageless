@@ -48,7 +48,9 @@ export interface Image extends ImageBlobData {
 export interface CollectionItem {
   cuid: CUID;
   title: string;
-  images: CUID[];
+  images?: CUID[];
+  createdAt: Date;
+  lastModifiedAt: Date;
 }
 
 
@@ -373,8 +375,132 @@ export class DynamoDBImageRepositoryTables {
     return this._imageItem(cuid, response.Item)
   }
 
-  deleteImageItem(cuid: CUID) {
-    return this.db.delete({ TableName: IMAGES_TABLE, Key: { cuid } })
+  /**
+   * Deletes an Image and updates all Collections that it was a part of.
+   *
+   * Because of DynamoDB's limit of 25 operations for a single transaction,
+   *  and an Image potentially being added to more than 25 collections,
+   *  the Image delete could succeed while some Images may not be updated due to timeouts or network issues.
+   *
+   * There is currently no automatic fixing of "Collections that point to a deleted Image" implemented.
+   * @param cuid Image ID
+   */
+  async deleteImageItemOptimistically(cuid: CUID) {
+    let deletedImage = await this.db.delete({ TableName: IMAGES_TABLE, Key: { cuid }, ReturnValues: "ALL_OLD" }).promise()
+    if (deletedImage.Attributes.collections) {
+      let
+        collections: CUID[] = deletedImage.Attributes.collections.values,
+        UpdateExpression = 'DELETE images :image',
+        ExpressionAttributeValues = { ':image': this.db.createSet([cuid]) },
+        imageUpdates = await Promise.all(
+          collections.map((cuid) => this.db.update({
+            TableName: COLLECTIONS_TABLE, Key: { cuid }, ReturnConsumedCapacity: "TOTAL",
+            UpdateExpression, ExpressionAttributeValues
+          }).promise())
+        )
+      return { deletedImage, imageUpdates }
+    } else {
+      return { deletedImage };
+    }
+  }
+
+  /*-----------------
+    Collections Table
+  -------------------*/
+
+  protected _collectionItem(cuid: CUID, Attributes, lastModifiedAt?: Date) {
+    if (!Attributes) return null;
+    let collection: CollectionItem = {
+      cuid: cuid,
+      title: Attributes.title,
+      createdAt: new Date(Attributes.createdAt),
+      lastModifiedAt: lastModifiedAt || new Date(Attributes.lastModifiedAt)
+    }
+    if (Attributes.images) {
+      collection.images = Attributes.images.values
+    }
+    return collection;
+  }
+
+  async createOrUpdateCollection(cuid: CUID, title: string): Promise<CollectionItem> {
+    let lastModifiedAtDate = new Date(),
+      lastModifiedAt = lastModifiedAtDate.toISOString(),
+      input = { title, lastModifiedAt, "?createdAt": lastModifiedAt },
+      params = object_to_updateItemInput(COLLECTIONS_TABLE, { cuid }, input);
+    params.ReturnValues = "ALL_NEW"
+    let result = await this.db.update(params).promise()
+    return this._collectionItem(cuid, result.Attributes, lastModifiedAtDate);
+  }
+
+  async getCollection(cuid: CUID, consistentRead: DynamoDB.DocumentClient.ConsistentRead = false) {
+    let response = await this.db.get({ TableName: COLLECTIONS_TABLE, Key: { cuid }, ConsistentRead: consistentRead }).promise()
+    return this._collectionItem(cuid, response.Item)
+  }
+
+  _collectionTransaction(action: 'ADD' | 'DELETE', collection: CUID, images: CUID[]): DynamoDB.DocumentClient.TransactWriteItemsInput {
+    let
+      collectionSet = { ':collection': this.db.createSet([collection]) },
+      imageExpr = action + ' collections :collection',
+      collectionExpr = action + ' images :images',
+      imageSet = { ':images': this.db.createSet(images) },
+      items: DynamoDB.DocumentClient.TransactWriteItemList = images.map((cuid) => ({
+        Update: {
+          TableName: IMAGES_TABLE,
+          Key: { cuid },
+          UpdateExpression: imageExpr,
+          ExpressionAttributeValues: collectionSet
+        }
+      }))
+    items.push({
+      Update: {
+        TableName: COLLECTIONS_TABLE,
+        Key: { cuid: collection },
+        UpdateExpression: collectionExpr,
+        ExpressionAttributeValues: imageSet
+      }
+    })
+    return { TransactItems: items, ReturnItemCollectionMetrics: "SIZE", ReturnConsumedCapacity: "TOTAL" }
+  }
+
+  addToCollection(collection: CUID, images: CUID[]) {
+    if (images.length > 12) throw new Error((images.length - 12) + " images too many! DynamoDB only supports up to 25 items in a transaction")
+    let params = this._collectionTransaction('ADD', collection, images)
+    return this.db.transactWrite(params)
+  }
+
+  removeFromCollection(collection: CUID, images: CUID[]) {
+    if (images.length > 12) throw new Error((images.length - 12) + " images too many! DynamoDB only supports up to 25 items in a transaction")
+    let params = this._collectionTransaction('DELETE', collection, images)
+    return this.db.transactWrite(params)
+  }
+
+  /**
+   * Deletes a Collection and updates all Images that are part of it.
+   *
+   * Because of DynamoDB's limit of 25 operations for a single transaction,
+   *  and a Collection potentially having more than 25 images,
+   *  the Collection delete could succeed while some Images may not be updated due to timeouts or network issues.
+   *
+   * There is currently no automatic fixing of "Images that point to a deleted Collection" implemented.
+   * @param cuid Collection ID
+   */
+  async deleteCollectionOptimistically(cuid: CUID) {
+    let deletedCollection = await this.db.delete({ TableName: COLLECTIONS_TABLE, Key: { cuid }, ReturnValues: "ALL_OLD" }).promise()
+    if (deletedCollection.Attributes.images) {
+      let
+        images: CUID[] = deletedCollection.Attributes.images.values,
+        UpdateExpression = 'DELETE collections :collection',
+        ExpressionAttributeValues = { ':collection': this.db.createSet([cuid]) },
+        imageUpdates = await Promise.all(
+          images.map((cuid) => this.db.update({
+            TableName: IMAGES_TABLE, Key: { cuid }, ReturnConsumedCapacity: "TOTAL",
+            UpdateExpression, ExpressionAttributeValues
+          }).promise())
+        )
+      return { deletedCollection, imageUpdates }
+    } else {
+      return { deletedCollection };
+    }
   }
 }
 
@@ -592,5 +718,3 @@ const default_db = new DynamoDBImageRepositoryTables(
 export const defaultStores = { s3: default_s3, db: default_db };
 export const images = new ImageRepository(default_s3, default_db);
 export const stream = new ImageRepository_DynamoDB_StreamHandler(default_s3, default_db);
-
-console.log(COLLECTIONS_TABLE); // Make TypeScript shut up about unused reference for now

@@ -243,10 +243,85 @@ describe('DynamoDB ImageRepository Table operations', () => {
     });
 
     it('should support deleting an Image', async () => {
-      let result = await db.deleteImageItem(cuid).promise()
-      expect(result).not.toBeNull()
+      let result = await db.deleteImageItemOptimistically(cuid)
+      expect(result.deletedImage.Attributes).not.toBeNull()
       expect(await db.getImage(cuid, true)).toBeNull()
-      //TODO: Update Collections in Transaction
+    });
+  })
+
+  describe('for Collections create/read/update/delete (CRUD) functionality', () => {
+    const cuid = scuid()
+    let createdAt: Date;
+
+    it('should support creating a Collection', async () => {
+      let title = "Gif files"
+      let now = new Date();
+      let { lastModifiedAt, ...result } = await db.createOrUpdateCollection(cuid, title)
+      createdAt = result.createdAt
+      expect(createdAt.valueOf() + 1000).toBeGreaterThanOrEqual(now.valueOf())
+      expect(lastModifiedAt).toEqual(now)
+      expect(result).toEqual({ cuid, title, createdAt })
+    });
+
+    it('should support removing a Collection', async () => {
+      let result = await db.deleteCollectionOptimistically(cuid)
+      expect(result.deletedCollection).not.toBeNull()
+      expect(await db.getCollection(cuid, true)).toBeNull()
+    });
+  })
+
+  describe('should manage Image <---> Collections Set membership', () => {
+    let
+      imageCuid = scuid(),
+      nonExistentImageCuid = scuid(),
+      collectionCuid = scuid();
+
+    it('adding an Image to a Collection', async () => {
+      let
+        image = (await db.createOrUpdateImage(imageCuid, { ...imageRef, title: "Not really an Image" }, "now", true)).image,
+        collection = await db.createOrUpdateCollection(collectionCuid, "Text files");
+      expect(image.collections).toBeUndefined()
+      expect(collection.images).toBeUndefined()
+
+      let addResult = await db.addToCollection(collectionCuid, [imageCuid]).promise()
+      expect(addResult.ConsumedCapacity.length).toBe(2)
+      expect(addResult.ConsumedCapacity[0].WriteCapacityUnits).toBe(4)
+
+      let addResult2 = await db.addToCollection(collectionCuid, [nonExistentImageCuid]).promise()
+      expect(addResult2.ConsumedCapacity.length).toBe(2)
+      expect(addResult2.ConsumedCapacity[0].WriteCapacityUnits).toBe(4)
+
+      let updatedCollection = await db.getCollection(collectionCuid, true)
+      //console.log(updatedCollection)
+      expect(updatedCollection.images).toEqual([imageCuid, nonExistentImageCuid])
+
+      let updatedImage = await db.getImage(imageCuid, true)
+      expect(updatedImage.collections).toEqual([collectionCuid])
+
+      let nonExistentImage = await db.getImage(nonExistentImageCuid, true)
+      expect(nonExistentImage.collections).toEqual([collectionCuid])
+    });
+
+    it('removing an Image from a Collection', async () => {
+      let removeResult = await db.removeFromCollection(collectionCuid, [nonExistentImageCuid]).promise()
+      expect(removeResult.ConsumedCapacity.length).toBe(2)
+      expect(removeResult.ConsumedCapacity[0].WriteCapacityUnits).toBe(4)
+
+      let updatedCollection = await db.getCollection(collectionCuid, true)
+      //console.log(updatedCollection)
+      expect(updatedCollection.images).toEqual([imageCuid]) // from previous test
+
+      let updatedImage = await db.getImage(nonExistentImageCuid, true)
+      expect(updatedImage.collections).toBeUndefined()
+    })
+
+    it('update referred Images when removing a Collection', async () => {
+      let result = await db.deleteCollectionOptimistically(collectionCuid)
+      //console.log("Delete result", result)
+      expect(result.deletedCollection.Attributes.images.values).toEqual([imageCuid]) // from previous test
+
+      let updatedImage = await db.getImage(imageCuid, true)
+      expect(updatedImage.collections).toBeUndefined()
     });
   })
 })
