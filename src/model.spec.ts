@@ -83,7 +83,7 @@ describe('S3 operations', () => {
       const key = { sha256: 'FAKE-SHA256', mimetype: 'French' }
       expectImageToNotExist(key)
       try {
-        await s3.moveUploadToImageBucket('never-uploaded', 'bogus', key, () => Promise.reject(new Error('Test failed: Copy should not succeed')))
+        await s3.moveUploadToImageBucket('never-uploaded', 'bogus', key, (action) => Promise.reject(new Error('Test failed: Copy should not succeed, but: ' + action)))
         throw 'Test failed';
       }
       catch (reason) {
@@ -93,9 +93,10 @@ describe('S3 operations', () => {
 
     it('should SUCCEED when upload (ID) does not exist, but destination (SHA-256) does', async () => {
       await s3.upload('just-uploaded', notImageData).promise()
-      await s3.moveUploadToImageBucket('just-uploaded', notImageETag, notImageS3Key, () => Promise.resolve())
-      let result = await s3.moveUploadToImageBucket('never-uploaded', 'bogus', notImageS3Key, () => Promise.resolve('Post copy op'))
-      expect(result.afterCopyCompleted).toBe('Post copy op')
+      let copied = await s3.moveUploadToImageBucket('just-uploaded', notImageETag, notImageS3Key, (action) => Promise.resolve(action))
+      expect(copied.afterCopyCompleted).toBe('copied')
+      let result = await s3.moveUploadToImageBucket('never-uploaded', 'bogus', notImageS3Key, (action) => Promise.resolve(action))
+      expect(result.afterCopyCompleted).toBe('existed')
       expect(result.awsResults.s3Delete).not.toBeNull()
       expect(result.awsResults.s3Head.ETag).toBe(notImageETag)
 
