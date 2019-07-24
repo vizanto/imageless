@@ -129,7 +129,8 @@ describe('DynamoDB ImageRepository Table operations', () => {
   const imageID = 'ref-' + Math.random()
   const imageID2 = 'ref2-' + Math.random()
   const sha = notImageSHA256
-  let now = new Date()
+  let now = new Date();
+  now.setMilliseconds(0);
   let imageRef: S3ReferenceItem = {
     sha256: sha,
     md5: notImageETag,
@@ -210,14 +211,31 @@ describe('DynamoDB ImageRepository Table operations', () => {
 
   describe('for `Image` create/read/update/delete (CRUD) functionality', () => {
     const cuid = scuid()
+    let { images, lastFileName, ...imageInput } = imageRef;
+    let input = { ...imageInput, title: lastFileName };
 
     it('should support creating an Image', async () => {
-      let { images, lastFileName, ...imageInput } = imageRef;
-      let input = { ...imageInput, title: lastFileName, uploadCompletedAt: new Date(2019, 7, 23) };
       let result = await db.createImage(cuid, input, "now")
-      console.log(result)
+      // console.log(result)
       expect(result.image).toMatchObject(input)
     });
+
+    it("should enforce replacing an Image's hashes when changing the blob it refers to", async () => {
+      const shouldRejectBlobData = (p) => {
+        expect(db.createImage(cuid, p, "now")).rejects.toMatchObject({ message: "Change of ImageBlobData requires a valid sha256, md5, and size" })
+      }
+      // Test changing hash with incomplete data
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB", md5: undefined })
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT BLOB", sha256: undefined })
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT", sha256: "DIFFERENT", size: undefined })
+      // Test changing only 1 hash
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB WITHOUT CHANGING MD5" })
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT BLOB WITHOUT CHANGING SHA256" })
+      // Changing both hashes should be find
+      let input = { ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB", md5: "DIFFERENT MD5" };
+      let result = await db.createImage(cuid, input, "now")
+      expect(result.image).toMatchObject(input)
+    })
 
     it('should support deleting an Image', async () => {
       let result = await db.deleteImageItem(cuid).promise()

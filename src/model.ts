@@ -230,6 +230,14 @@ export const object_to_updateItemInput = (tableName: string, key: DynamoDB.Docum
 
 const { S3REFS_TABLE, IMAGES_TABLE, COLLECTIONS_TABLE } = process.env;
 
+export class ValidationError extends Error {
+  readonly relatedObject: object;
+  constructor(message: string, relatedObject: object) {
+    super(message)
+    this.relatedObject = relatedObject;
+  }
+}
+
 export class DynamoDBImageRepositoryTables {
   readonly db: DynamoDB.DocumentClient;
 
@@ -284,10 +292,25 @@ export class DynamoDBImageRepositoryTables {
   }
 
   async _updateImageItem(cuid: string, returnValues: "ALL_NEW" | "NONE", input) {
+    let {sha256, md5, size} = input;
+    if ((sha256 || md5 || size) && !(sha256 && md5 && size)) {
+      throw new ValidationError("Change of ImageBlobData requires a valid sha256, md5, and size", {input: input});
+    }
     let params = object_to_updateItemInput(IMAGES_TABLE, { "cuid": cuid }, input);
     params.ReturnValues = returnValues
-    params.ConditionExpression = '(attribute_not_exists(sha256) OR sha256 = :sha256)'
-    let result = await this.db.update(params).promise();
+    params.ConditionExpression = '(attribute_not_exists(sha256) AND attribute_not_exists(md5)) OR (sha256 = :sha256 AND md5 = :md5) OR (sha256 <> :sha256 AND md5 <> :md5)'
+    let result;
+    try {
+     result = await this.db.update(params).promise();
+    }
+    catch (e) {
+      if ((e as AWSError).code == 'ConditionalCheckFailedException') {
+        // console.error(cuid, e, input)
+        throw new ValidationError("Change of ImageBlobData requires a valid sha256, md5, and size", {awsError: e, cuid: cuid, input: input})
+      } else {
+        throw e
+      }
+    }
     let { Attributes } = result;
     if (Attributes) {
       let image: Image = {
