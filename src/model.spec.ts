@@ -34,7 +34,7 @@ describe('S3 operations', () => {
         : "https://s3.amazonaws.com/images/HASH.png")
   });
 
-  it('should store objects correctly, and roundtrips result in the same meta-data', async () => {
+  it('should store objects correctly, and roundtrips result in the same meta-data (allowing uploadCompleteAt to be off by 1 second)', async () => {
     const id = 'not-an-image'
     let body = readableBody(notImageData)
     let imageMetaStream = s3.streamMetadata(body)
@@ -45,9 +45,11 @@ describe('S3 operations', () => {
     expect(image_fetched).toEqual(notImageData)
 
     // Roundtrip check
-    let imageMeta = await imageMetaStream
-    let imageComputed = await s3.calculateMetadataFromUpload(id)
-
+    let { uploadCompletedAt: uploadCompletedStamp, ...imageMeta } = await imageMetaStream
+    let { uploadCompletedAt: lastModifiedStamp, ...imageComputed } = await s3.calculateMetadataFromUpload(id)
+    // Sometimes the Readable ends (upload completes) in the second just before S3 finishes
+    // and S3's Last-Modified timestamp ends up as that next second.
+    expect(uploadCompletedStamp.valueOf() + 1000).toBeGreaterThanOrEqual(lastModifiedStamp.valueOf())
     expect(imageComputed.sha256).toEqual(notImageSHA256)
     expect(imageMeta.sha256).toEqual(notImageSHA256)
     expect(imageMeta).toEqual(imageComputed)

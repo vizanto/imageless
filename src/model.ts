@@ -126,7 +126,7 @@ export class S3ImageRepositoryBuckets {
    * Especially useful to process Pre-signed URL client uploads.
    * @param cuid The upload S3-key
    */
-  async calculateMetadataFromUpload(cuid: CUID): Promise<ImageBlobData> {
+  async calculateMetadataFromUpload(cuid: CUID): Promise<Readonly<ImageBlobData>> {
     let upload = await this.getUpload(cuid).promise();
     // console.log("Got object", cuid, upload)
     let readable = readableBody(upload.Body);
@@ -134,7 +134,9 @@ export class S3ImageRepositoryBuckets {
     if (meta.size != upload.ContentLength) {
       throw new Error(`Expected upload:${cuid} to be of size: ${meta.size}, but S3 size is: ${upload.ContentLength}`);
     }
-    return { ...meta, uploadCompletedAt: upload.LastModified };
+    // console.log(meta.uploadCompletedAt, "=", meta.uploadCompletedAt.valueOf(), upload.LastModified, "=", upload.LastModified.valueOf());
+    meta.uploadCompletedAt = upload.LastModified;
+    return Object.freeze(meta)
   }
 
   protected copyFromUploadBucket(cuid: string, eTag: string, key: S3ImageKey) {
