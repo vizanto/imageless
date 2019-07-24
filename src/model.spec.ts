@@ -214,9 +214,11 @@ describe('DynamoDB ImageRepository Table operations', () => {
     const cuid = scuid()
     let { images, lastFileName, ...imageInput } = imageRef;
     let input = { ...imageInput, title: lastFileName };
+    let createdAt: Date;
 
     it('should support creating an Image', async () => {
       let result = await db.createImage(cuid, input, "now")
+      createdAt = result.image.createdAt
       // console.log(result)
       expect(result.image).toMatchObject(input)
     });
@@ -235,6 +237,11 @@ describe('DynamoDB ImageRepository Table operations', () => {
       // Changing both hashes should only be allowed in a transaction
       shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB", md5: "DIFFERENT MD5" }).toMatchObject(changeInvalid)
     })
+
+    it('should support reading an Image', async () => {
+      let image = await db.getImage(cuid, true)
+      expect(image).toEqual({...input, cuid, createdAt})
+    });
 
     it('should support deleting an Image', async () => {
       let result = await db.deleteImageItem(cuid).promise()

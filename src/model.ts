@@ -278,7 +278,7 @@ export class DynamoDBImageRepositoryTables {
     );
   }
 
-  getReferenceItem(sha256: URL_Safe_Base64_SHA256, consistentRead = true) {
+  getReferenceItem(sha256: URL_Safe_Base64_SHA256, consistentRead: DynamoDB.DocumentClient.ConsistentRead = true) {
     return this.db.get({ TableName: S3REFS_TABLE, Key: { sha256 }, ConsistentRead: consistentRead })
   }
 
@@ -293,46 +293,49 @@ export class DynamoDBImageRepositoryTables {
   async _updateImageItem(cuid: string, returnValues: "ALL_NEW" | "NONE", input) {
     let params = object_to_updateItemInput(IMAGES_TABLE, { cuid }, input);
     params.ReturnValues = returnValues
-    let {sha256, md5, size} = input;
+    let { sha256, md5, size } = input;
     if ((sha256 || md5 || size)) {
       if (!(sha256 && md5 && size)) {
         throw new ValidationError("Change of ImageBlobData requires a valid sha256, md5, and size", { input });
       }
       params.ConditionExpression = '(attribute_not_exists(sha256) AND attribute_not_exists(md5)) OR (sha256 = :sha256 AND md5 = :md5)'
     }
-    let dbResult;
+    let dbResult: PromiseResult<DynamoDB.DocumentClient.UpdateItemOutput, AWSError>;
     try {
-     dbResult = await this.db.update(params).promise();
+      dbResult = await this.db.update(params).promise();
     }
     catch (e) {
       if ((e as AWSError).code == 'ConditionalCheckFailedException') {
         // console.error(cuid, e, input)
-        throw new ValidationError("Changes to ImageBlobData must atomically update related S3ReferenceItems", {awsError: e, cuid: cuid, input: input})
+        throw new ValidationError("Changes to ImageBlobData must atomically update related S3ReferenceItems", { awsError: e, cuid: cuid, input: input })
       } else {
         throw e
       }
     }
-    let { Attributes } = dbResult;
-    if (Attributes) {
-      let image: Image = {
-        sha256: Attributes.sha256,
-        mimetype: Attributes.mimetype,
-        md5: Attributes.md5,
-        uploadCompletedAt: new Date(Attributes.uploadCompletedAt),
-        size: Attributes.size,
-        width: Attributes.width,
-        height: Attributes.height,
-        cuid: cuid,
-        createdAt: new Date(Attributes.createdAt),
-        title: Attributes.title
-      }
-      if (Attributes.collections) {
-        image.collections = Attributes.collections.values;
-      }
-      return { image, dbResult };
+    if (dbResult.Attributes) {
+      return { dbResult, image: this._imageItem(cuid, dbResult.Attributes) }
     } else {
       return { dbResult };
     }
+  }
+
+  protected _imageItem(cuid: string, Attributes) {
+    let image: Image = {
+      sha256: Attributes.sha256,
+      mimetype: Attributes.mimetype,
+      md5: Attributes.md5,
+      uploadCompletedAt: new Date(Attributes.uploadCompletedAt),
+      size: Attributes.size,
+      width: Attributes.width,
+      height: Attributes.height,
+      cuid: cuid,
+      createdAt: new Date(Attributes.createdAt),
+      title: Attributes.title
+    }
+    if (Attributes.collections) {
+      image.collections = Attributes.collections.values;
+    }
+    return image;
   }
 
   /**
@@ -353,7 +356,12 @@ export class DynamoDBImageRepositoryTables {
       "?createdAt": createdAt.toUTCString(),
       uploadCompletedAt: uploadCompletedAt.toUTCString(),
     });
-    return this._updateImageItem(cuid, returnImage? "ALL_NEW" : "NONE", input);
+    return this._updateImageItem(cuid, returnImage ? "ALL_NEW" : "NONE", input);
+  }
+
+  async getImage(cuid: string, consistentRead: DynamoDB.DocumentClient.ConsistentRead = false) {
+    let response = await this.db.get({ TableName: IMAGES_TABLE, Key: { cuid }, ConsistentRead: consistentRead }).promise()
+    return this._imageItem(cuid, response.Item)
   }
 
   deleteImageItem(cuid: CUID) {
