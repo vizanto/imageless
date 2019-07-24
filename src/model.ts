@@ -159,17 +159,17 @@ export class S3ImageRepositoryBuckets {
   async moveUploadToImageBucket<T>(cuid: string, eTag: string, image: S3ImageKey, onImageReady: (image: "copied" | "existed") => Promise<T>) {
     // 1. Copy from upload to image bucket if not exists
     let copyOp = this.copyFromUploadBucket(cuid, eTag, image).promise();
-    let copyResult: PromiseResult<S3.CopyObjectOutput, AWSError>;
+    let s3Copy: PromiseResult<S3.CopyObjectOutput, AWSError>;
     try {
-      copyResult = await copyOp;
+      s3Copy = await copyOp;
     } catch (reason) {
       if (reason.statusCode == 404) {
         try {
           // Check if the intended destination exists
-          let headResult = await this.headImage(image).promise();
+          let s3Head = await this.headImage(image).promise();
           // It exists! Continue as if upload was copied...
           return {
-            awsResults: { s3Head: headResult },
+            awsResults: { s3Head },
             afterCopyCompleted: await onImageReady("existed")
           }
         } catch {
@@ -180,10 +180,9 @@ export class S3ImageRepositoryBuckets {
     // 2. Notify caller copy was completed
     let handlerResult = await onImageReady("copied");
     // 3. Success! Clean up the S3 upload bucket
-    let deleteOp = this.deleteFromUploadBucket(cuid).promise();
-    let deleteResult = await deleteOp;
+    let s3Delete = await this.deleteFromUploadBucket(cuid).promise();
     return {
-      awsResults: { s3Copy: copyResult, s3Delete: deleteResult },
+      awsResults: { s3Copy, s3Delete },
       afterCopyCompleted: handlerResult
     }
   }
@@ -246,7 +245,7 @@ export class DynamoDBImageRepositoryTables {
   }
 
   async _updateReferenceItem(sha256: string, SET?, ADD?, DELETE?): Promise<S3ReferenceItem> {
-    let params = object_to_updateItemInput(S3REFS_TABLE, { "sha256": sha256 }, SET, ADD, DELETE);
+    let params = object_to_updateItemInput(S3REFS_TABLE, { sha256 }, SET, ADD, DELETE);
     params.ReturnValues = "UPDATED_NEW"
     if (SET) {
       if (SET.md5 && SET.size && SET.mimetype) {
@@ -258,7 +257,7 @@ export class DynamoDBImageRepositoryTables {
     // console.log("About to update", params, "with", params.UpdateExpression)
     let { Attributes } = await this.db.update(params).promise();
     return {
-      sha256: sha256,
+      sha256,
       mimetype: Attributes.mimetype,
       md5: Attributes.md5,
       uploadCompletedAt: new Date(Attributes.uploadCompletedAt),
@@ -280,7 +279,7 @@ export class DynamoDBImageRepositoryTables {
   }
 
   getReferenceItem(sha256: URL_Safe_Base64_SHA256, consistentRead = true) {
-    return this.db.get({ TableName: S3REFS_TABLE, Key: { "sha256": sha256 }, ConsistentRead: consistentRead })
+    return this.db.get({ TableName: S3REFS_TABLE, Key: { sha256 }, ConsistentRead: consistentRead })
   }
 
   async removeReferences(sha256: URL_Safe_Base64_SHA256, refs: CUID[]) {
@@ -288,22 +287,22 @@ export class DynamoDBImageRepositoryTables {
   }
 
   deleteReferenceItem(sha256: URL_Safe_Base64_SHA256) {
-    return this.db.delete({ TableName: S3REFS_TABLE, Key: { "sha256": sha256 } })
+    return this.db.delete({ TableName: S3REFS_TABLE, Key: { sha256 } })
   }
 
   async _updateImageItem(cuid: string, returnValues: "ALL_NEW" | "NONE", input) {
-    let params = object_to_updateItemInput(IMAGES_TABLE, { "cuid": cuid }, input);
+    let params = object_to_updateItemInput(IMAGES_TABLE, { cuid }, input);
     params.ReturnValues = returnValues
     let {sha256, md5, size} = input;
     if ((sha256 || md5 || size)) {
       if (!(sha256 && md5 && size)) {
-        throw new ValidationError("Change of ImageBlobData requires a valid sha256, md5, and size", { input: input });
+        throw new ValidationError("Change of ImageBlobData requires a valid sha256, md5, and size", { input });
       }
       params.ConditionExpression = '(attribute_not_exists(sha256) AND attribute_not_exists(md5)) OR (sha256 = :sha256 AND md5 = :md5)'
     }
-    let result;
+    let dbResult;
     try {
-     result = await this.db.update(params).promise();
+     dbResult = await this.db.update(params).promise();
     }
     catch (e) {
       if ((e as AWSError).code == 'ConditionalCheckFailedException') {
@@ -313,7 +312,7 @@ export class DynamoDBImageRepositoryTables {
         throw e
       }
     }
-    let { Attributes } = result;
+    let { Attributes } = dbResult;
     if (Attributes) {
       let image: Image = {
         sha256: Attributes.sha256,
@@ -330,9 +329,9 @@ export class DynamoDBImageRepositoryTables {
       if (Attributes.collections) {
         image.collections = Attributes.collections.values;
       }
-      return { image: image, dbResult: result };
+      return { image, dbResult };
     } else {
-      return { dbResult: result };
+      return { dbResult };
     }
   }
 
@@ -358,7 +357,7 @@ export class DynamoDBImageRepositoryTables {
   }
 
   deleteImageItem(cuid: CUID) {
-    return this.db.delete({ TableName: IMAGES_TABLE, Key: { "cuid": cuid } })
+    return this.db.delete({ TableName: IMAGES_TABLE, Key: { cuid } })
   }
 }
 
@@ -433,7 +432,7 @@ export class ImageRepository_DynamoDB_StreamHandler {
         return this._concurrentMoveUploadsAndCreateImageItems(newImage.images.SS, sha256, newImage)
       case "REMOVE":
         // Delete from S3 when all references to an S3-object are removed from DynamoDB
-        let deleteOp = this.s3.deleteUnreferencedImage({ sha256: sha256, mimetype: record.OldImage.mimetype.S }).promise()
+        let deleteOp = this.s3.deleteUnreferencedImage({ sha256, mimetype: record.OldImage.mimetype.S }).promise()
         return deleteOp.then(r => [r])
       case "MODIFY":
         // Synchronize changes to S3-references items with actual S3 storage
