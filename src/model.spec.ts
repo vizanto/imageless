@@ -217,7 +217,7 @@ describe('DynamoDB ImageRepository Table operations', () => {
     let createdAt: Date;
 
     it('should support creating an Image', async () => {
-      let result = await db.createImage(cuid, input, "now")
+      let result = await db.createOrUpdateImage(cuid, input, "now")
       createdAt = result.image.createdAt
       // console.log(result)
       expect(result.image).toMatchObject(input)
@@ -226,7 +226,7 @@ describe('DynamoDB ImageRepository Table operations', () => {
     it("should reject replacing an Image's hashes outside of a transaction that updates the related `S3ReferenceItem.images`", async () => {
       const inputInvalid = { message: "Change of ImageBlobData requires a valid sha256, md5, and size" }
       const changeInvalid = { message: "Changes to ImageBlobData must atomically update related S3ReferenceItems" }
-      const shouldRejectBlobData = (p) => expect(db.createImage(cuid, p, "now")).rejects
+      const shouldRejectBlobData = (p) => expect(db.createOrUpdateImage(cuid, p, "now")).rejects
       // Test changing hash with incomplete data
       shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB", md5: undefined }).toMatchObject(inputInvalid)
       shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT BLOB", sha256: undefined }).toMatchObject(inputInvalid)
@@ -239,14 +239,14 @@ describe('DynamoDB ImageRepository Table operations', () => {
     })
 
     it('should support reading an Image', async () => {
-      let image = await db.getImage(cuid, true)
-      expect(image).toEqual({...input, cuid, createdAt})
+      expect(await db.getImage(cuid, true)).toEqual({ ...input, cuid, createdAt })
     });
 
     it('should support deleting an Image', async () => {
       let result = await db.deleteImageItem(cuid).promise()
       expect(result).not.toBeNull()
-      //TODO: Update Collections in DynamoDB Streams handler
+      expect(await db.getImage(cuid, true)).toBeNull()
+      //TODO: Update Collections in Transaction
     });
   })
 })
