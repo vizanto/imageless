@@ -221,21 +221,19 @@ describe('DynamoDB ImageRepository Table operations', () => {
       expect(result.image).toMatchObject(input)
     });
 
-    it("should enforce replacing an Image's hashes when changing the blob it refers to", async () => {
-      const shouldRejectBlobData = (p) => {
-        expect(db.createImage(cuid, p, "now")).rejects.toMatchObject({ message: "Change of ImageBlobData requires a valid sha256, md5, and size" })
-      }
+    it("should reject replacing an Image's hashes outside of a transaction that updates the related `S3ReferenceItem.images`", async () => {
+      const inputInvalid = { message: "Change of ImageBlobData requires a valid sha256, md5, and size" }
+      const changeInvalid = { message: "Changes to ImageBlobData must atomically update related S3ReferenceItems" }
+      const shouldRejectBlobData = (p) => expect(db.createImage(cuid, p, "now")).rejects
       // Test changing hash with incomplete data
-      shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB", md5: undefined })
-      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT BLOB", sha256: undefined })
-      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT", sha256: "DIFFERENT", size: undefined })
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB", md5: undefined }).toMatchObject(inputInvalid)
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT BLOB", sha256: undefined }).toMatchObject(inputInvalid)
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT", sha256: "DIFFERENT", size: undefined }).toMatchObject(inputInvalid)
       // Test changing only 1 hash
-      shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB WITHOUT CHANGING MD5" })
-      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT BLOB WITHOUT CHANGING SHA256" })
-      // Changing both hashes should be find
-      let input = { ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB", md5: "DIFFERENT MD5" };
-      let result = await db.createImage(cuid, input, "now")
-      expect(result.image).toMatchObject(input)
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB WITHOUT CHANGING MD5" }).toMatchObject(changeInvalid)
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, md5: "DIFFERENT BLOB WITHOUT CHANGING SHA256" }).toMatchObject(changeInvalid)
+      // Changing both hashes should only be allowed in a transaction
+      shouldRejectBlobData({ ...imageInput, title: lastFileName, sha256: "DIFFERENT BLOB", md5: "DIFFERENT MD5" }).toMatchObject(changeInvalid)
     })
 
     it('should support deleting an Image', async () => {

@@ -53,8 +53,8 @@ Only when no Image items refer to a file on S3 can it be safely removed. This cl
 - The DynamoDB table design favors read performance over writes, storing Collection membership in both Image and Collection items
 - Writes (Create, Update, Delete) are processed in DynamoDB streams handler and may eventually create or delete objects in S3
 - DynamoDB transactions are used to update both Image and Collection sets atomically
-  - Note: Transaction could be replaced by a Streams handler to save costs (DynamoDB Write Units)
 - DynamoDB transactions are used to change what blob an Image refers to (likely an uncommon operation)
+- Note: Transactions could be replaced by a Streams handler to potentially save costs (DynamoDB Write Units cost vs additional Lambda cost)
 
 
 ### Image uploads
