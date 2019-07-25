@@ -34,7 +34,7 @@ describe('S3 operations', () => {
         : "https://s3.amazonaws.com/images/HASH.png")
   });
 
-  it('should store objects correctly, and roundtrips result in the same meta-data (allowing uploadCompleteAt to be off by 1 second)', async () => {
+  it('upload->download roundtrips should result in the same meta-data (allowing uploadCompleteAt to be off by 1 second)', async () => {
     const id = 'not-an-image'
     let body = readableBody(notImageData)
     let imageMetaStream = s3.streamMetadata(body)
@@ -60,8 +60,8 @@ describe('S3 operations', () => {
     expectUploadToNotExist(id)
   });
 
-  describe('should support moving an uploaded image to content-addressable storage', () => {
-    it('should delete the upload after copying to image bucket', async () => {
+  describe('should support moving an uploaded image to immutable content-addressable storage', () => {
+    it('should delete the upload after copying to immutable image bucket', async () => {
       const id = 'some-upload-to-be-moved'
       const data = 'This is not an image'
       const image = { sha256: 'not really a hash', mimetype: 'application/octet-stream' }
@@ -73,6 +73,10 @@ describe('S3 operations', () => {
       })
       expect(s3Copy.CopyObjectResult.ETag).toBe(notImageETag)
       expectUploadToNotExist(id)
+
+      // Check object is immutable
+      let immutableImage = await s3.headImage(image).promise()
+      expect(immutableImage.CacheControl).toBe("public,max-age=31536000,immutable")
 
       // Cleanup after above tests
       await s3.deleteUnreferencedImage(image).promise()

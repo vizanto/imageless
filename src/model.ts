@@ -146,6 +146,8 @@ export class S3ImageRepositoryBuckets {
       CopySource: this.uploadBucket + "/" + cuid,
       CopySourceIfMatch: eTag,
       ContentType: key.mimetype,
+      CacheControl: "public,max-age=31536000,immutable",
+      MetadataDirective: "REPLACE",
       Bucket: this.imagesBucket,
       Key: this.imageS3Key(key)
     }, null)
