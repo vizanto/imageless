@@ -1,0 +1,853 @@
+{
+    "Records": [
+        {
+            "eventID": "f982efe1-b57d-4e5c-8813-d75fa777e06c",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "SequenceNumber": "000000000000000000001",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 289,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-1336"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "INSERT",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "cc726b62-6ac5-4252-8528-69b46b84ccc6",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-1336"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000002",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 553,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-1336",
+                            "ref2-static-2944"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "MODIFY",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "8c6851a5-8368-4584-a839-6b1a109fd32f",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-1336",
+                            "ref2-static-2944"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000003",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 577,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "1337"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-1336",
+                            "ref2-static-2944"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "MODIFY",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "2551ef5b-9cf1-4c99-a63f-1feb69737dca",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "1337"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-1336",
+                            "ref2-static-2944"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000004",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 577,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "1337"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-1336",
+                            "ref2-static-2944"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "MODIFY",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "dbe92ff1-bc3c-4412-a486-b7b695e56f1f",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "1337"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-1336",
+                            "ref2-static-2944"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000005",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 553,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "1337"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref2-static-2944"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "MODIFY",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "f0a7b743-baf5-4877-b12a-522aea47a317",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:25.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "1337"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref2-static-2944"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000006",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 289,
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "REMOVE",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "9f05e415-50dd-4483-814a-7a29eb4ff0c6",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "SequenceNumber": "000000000000000000021",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 287,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-4391"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "INSERT",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "11aaf93f-fa4f-4357-9d87-3acadefd8894",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-4391"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000022",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 548,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-4391",
+                            "ref2-static-8608"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "MODIFY",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "ef3b1f6d-51bb-4636-b984-2f6042c369e0",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-4391",
+                            "ref2-static-8608"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000023",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 571,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "1337"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-4391",
+                            "ref2-static-8608"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "MODIFY",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "eb73cf2d-c0e5-413f-9c68-df42452dc626",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "456"
+                    },
+                    "width": {
+                        "N": "1337"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-4391",
+                            "ref2-static-8608"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000024",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 571,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "1337"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-4391",
+                            "ref2-static-8608"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "MODIFY",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "ec71c5fc-48d5-4467-992b-d71069ae0155",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "1337"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref-static-4391",
+                            "ref2-static-8608"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000025",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 549,
+                "NewImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "1337"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref2-static-8608"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "MODIFY",
+            "eventSource": "aws:dynamodb"
+        },
+        {
+            "eventID": "8eff5af0-eaed-4a99-8ca8-097b71f5bd59",
+            "eventVersion": "1.1",
+            "dynamodb": {
+                "OldImage": {
+                    "mimetype": {
+                        "S": "application/octet-stream"
+                    },
+                    "uploadCompletedAt": {
+                        "S": "2019-07-25T14:27:30.000Z"
+                    },
+                    "lastFileName": {
+                        "S": "not-an-image.txt"
+                    },
+                    "height": {
+                        "N": "1337"
+                    },
+                    "width": {
+                        "N": "123"
+                    },
+                    "size": {
+                        "N": "20"
+                    },
+                    "images": {
+                        "SS": [
+                            "ref2-static-8608"
+                        ]
+                    },
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    },
+                    "md5": {
+                        "S": "\"2c3cd6f2e5c6fc39aba84f8a622450cd\""
+                    }
+                },
+                "SequenceNumber": "000000000000000000026",
+                "Keys": {
+                    "sha256": {
+                        "S": "_cWsotwchgL821xFjuneqmAB62cgBgJrattCdLD3MVE"
+                    }
+                },
+                "SizeBytes": 288,
+                "ApproximateCreationDateTime": 1564064820.0,
+                "StreamViewType": "NEW_AND_OLD_IMAGES"
+            },
+            "awsRegion": "ddblocal",
+            "eventName": "REMOVE",
+            "eventSource": "aws:dynamodb"
+        }
+    ],
+    "NextShardIterator": "000|arn:aws:dynamodb:ddblocal:000000000000:table/S3Refs-dev/stream/2019-07-25T14:19:58.185|c2hhcmRJZC0wMDAwMDAwMTU2NDA2NDM5ODIxMC0xODU4MWRjNHwwMDAwMDAwMDAwMDAwMDAwMDAwMjd8MDAwMDAwMDAwMDAwMDAwMDAxNTY0MDY1MDEzMDU0"
+}

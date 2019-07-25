@@ -1,4 +1,4 @@
-import { defaultStores, readableBody, IS_OFFLINE, S3ImageKey, S3ReferenceItem } from './model'
+import { defaultStores, readableBody, IS_OFFLINE, S3ImageKey, S3ReferenceItem, stream } from './model'
 import * as getStream from 'get-stream'
 import base64url from 'base64url';
 const { s3, db } = defaultStores
@@ -67,7 +67,7 @@ describe('S3 operations', () => {
       const image = { sha256: 'not really a hash', mimetype: 'application/octet-stream' }
       let uploadResult = await s3.upload(id, data).promise()
       expect(uploadResult.ETag).toBe(notImageETag)
-      let { awsResults: { s3Copy } } = await s3.moveUploadToImageBucket(id, notImageETag, image, async () => {
+      let { awsResults: { s3Copy } } = await s3.moveUploadToImageBucket(id, notImageETag, image, false, async () => {
         let uploaded = await s3.getUpload(id).promise()
         expect(uploaded.ETag).toBe(notImageETag) // Check the upload still exists
       })
@@ -87,19 +87,19 @@ describe('S3 operations', () => {
       const key = { sha256: 'FAKE-SHA256', mimetype: 'French' }
       expectImageToNotExist(key)
       try {
-        await s3.moveUploadToImageBucket('never-uploaded', 'bogus', key, (action) => Promise.reject(new Error('Test failed: Copy should not succeed, but: ' + action)))
-        throw 'Test failed';
+        await s3.moveUploadToImageBucket('never-uploaded', 'bogus', key, false, (action) => Promise.reject(new Error('Test failed: Copy should not succeed, but: ' + action)))
+        fail("Move completed when it shouldn't");
       }
       catch (reason) {
-        expect(reason).toMatchObject({ code: "NoSuchKey", message: "The specified key does not exist." });
+        expect(reason).toMatchObject({ relatedObject: { uploadMissing: true, image: key }, s3Response: { code: "NotFound" } });
       }
     });
 
     it('should SUCCEED when upload (ID) does not exist, but destination (SHA-256) does', async () => {
       await s3.upload('just-uploaded', notImageData).promise()
-      let copied = await s3.moveUploadToImageBucket('just-uploaded', notImageETag, notImageS3Key, (action) => Promise.resolve(action))
+      let copied = await s3.moveUploadToImageBucket('just-uploaded', notImageETag, notImageS3Key, false, (action) => Promise.resolve(action))
       expect(copied.afterCopyCompleted).toBe('copied')
-      let result = await s3.moveUploadToImageBucket('never-uploaded', 'bogus', notImageS3Key, (action) => Promise.resolve(action))
+      let result = await s3.moveUploadToImageBucket('never-uploaded', 'bogus', notImageS3Key, false, (action) => Promise.resolve(action))
       expect(result.afterCopyCompleted).toBe('existed')
       expect(result.awsResults.s3Delete).not.toBeNull()
       expect(result.awsResults.s3Head.ETag).toBe(notImageETag)
@@ -115,7 +115,7 @@ describe('S3 operations', () => {
       const notImageETag = '\"a260985349903b35c47eb6f29f64bd4f\"'
       const image = { sha256: 'not really a hash 2', mimetype: 'application/octet-stream' }
       await s3.upload(id, data).promise()
-      let { awsResults: { s3Copy } } = await s3.moveUploadToImageBucket(id, notImageETag, image, async () => {
+      let { awsResults: { s3Copy } } = await s3.moveUploadToImageBucket(id, notImageETag, image, false, async () => {
         await s3.deleteFromUploadBucket(id).promise()
         expectUploadToNotExist(id)
       })
@@ -263,7 +263,7 @@ describe('DynamoDB ImageRepository Table operations', () => {
       let { lastModifiedAt, ...result } = await db.createOrUpdateCollection(cuid, title)
       createdAt = result.createdAt
       expect(createdAt.valueOf() + 1000).toBeGreaterThanOrEqual(now.valueOf())
-      expect(lastModifiedAt).toEqual(now)
+      expect(lastModifiedAt.valueOf() + 2).toBeGreaterThanOrEqual(now.valueOf())
       expect(result).toEqual({ cuid, title, createdAt })
     });
 
@@ -328,4 +328,24 @@ describe('DynamoDB ImageRepository Table operations', () => {
       expect(updatedImage.collections).toBeUndefined()
     });
   })
+})
+
+describe('DynamoDB Stream event handler', () => {
+  const { Records } = require('../resources/S3Refs-test-stream.json')
+
+  describe('synchronizing changes between S3 and the S3-Reference DynamoDB Table', () => {
+    it('should ignore missing uploads for which the target immutable object is also missing', async () => {
+      /**
+       * - This can happen if the `image` is deleted after moving from `upload`,
+       *    but before the reference record is processed by the Stream handler.
+      */
+      let moveOp = spyOn(s3, "moveUploadToImageBucket").and.callThrough()
+      try {
+        await stream.handleS3ReferenceTableEventBatch(Records)
+        expect(moveOp.calls.count()).toBe(4)
+      } catch (reason) {
+        fail(reason)
+      }
+    });
+  });
 })

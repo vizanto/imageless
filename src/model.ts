@@ -57,6 +57,16 @@ export interface CollectionItem {
 /*------
   S3 ops
 --------*/
+export class S3Error extends Error {
+  readonly relatedObject: any;
+  readonly s3Response: AWSError;
+  constructor(message: string, relatedObject: any, s3Response: AWSError) {
+    super(message)
+    this.relatedObject = relatedObject;
+    this.s3Response = s3Response;
+  }
+}
+
 export class S3ImageRepositoryBuckets {
   private s3: S3;
   readonly uploadBucket: string;
@@ -158,27 +168,44 @@ export class S3ImageRepositoryBuckets {
    * @param cuid uploaded object (source)
    * @param eTag checksum by S3, usually Base16 MD5 String wrapped in double quotes (")
    * @param image destination
+   * @param s3HeadBeforeCopy if it is likely the `image` already exists, set this to `true` to reduce S3 costs
    * @param onImageReady called as soon as object in image bucket exists, usually to Create or Update an Image DynamoDB item for this upload
    */
-  async moveUploadToImageBucket<T>(cuid: string, eTag: string, image: S3ImageKey, onImageReady: (image: "copied" | "existed") => Promise<T>) {
+  async moveUploadToImageBucket<T>(cuid: string, eTag: string, image: S3ImageKey, s3HeadBeforeCopy = false, onImageReady: (image: "copied" | "existed") => Promise<T>) {
     // 1. Copy from upload to image bucket if not exists
-    let copyOp = this.copyFromUploadBucket(cuid, eTag, image).promise();
+    let s3Head: PromiseResult<S3.HeadObjectOutput, AWSError>;
+    let s3HeadError: AWSError;
     let s3Copy: PromiseResult<S3.CopyObjectOutput, AWSError>;
+    if (s3HeadBeforeCopy) {
+      // Check if destination already exists (HEAD is 12.5x cheaper in USD than a COPY request)
+      try {
+        s3Head = await this.headImage(image).promise();
+      } catch (reason) {
+        s3HeadError = reason
+      }
+    }
+    // Try to copy from upload to image bucket
     try {
-      s3Copy = await copyOp;
+      s3Copy = await this.copyFromUploadBucket(cuid, eTag, image).promise();
     } catch (reason) {
+      const failureMessage = "Couldn't copy " + cuid + " from upload bucket"
       if (reason.statusCode == 404) {
-        try {
+        if (!s3HeadBeforeCopy) try {
           // Check if the intended destination exists
-          let s3Head = await this.headImage(image).promise();
+          s3Head = await this.headImage(image).promise();
           // It exists! Continue as if upload was copied...
-          return {
-            awsResults: { s3Head },
-            afterCopyCompleted: await onImageReady("existed")
-          }
-        } catch {
-          throw reason; // Nope. Abort!
+        } catch (reason) {
+          s3HeadError = reason;
         }
+        if (s3HeadError) {
+          let uploadMissing = s3HeadError.statusCode == 404;
+          const message = failureMessage + (uploadMissing ? " and " + this.urlOf(image) + " does not exist" : "");
+          console.log(message)
+          throw new S3Error(message, { uploadMissing, image }, s3HeadError);
+        }
+      } else {
+        console.log(failureMessage)
+        throw new S3Error(failureMessage, { image }, s3HeadError);
       }
     }
     // 2. Notify caller copy was completed
@@ -186,7 +213,7 @@ export class S3ImageRepositoryBuckets {
     // 3. Success! Clean up the S3 upload bucket
     let s3Delete = await this.deleteFromUploadBucket(cuid).promise();
     return {
-      awsResults: { s3Copy, s3Delete },
+      awsResults: { s3Head, s3Copy, s3Delete },
       afterCopyCompleted: handlerResult
     }
   }
@@ -530,19 +557,30 @@ export class ImageRepository_DynamoDB_StreamHandler {
     this.db = db;
   }
 
-  async _moveUploadAndCreateImageItem(cuid: string, newImage: ImageInput) {
+  async _moveUploadAndCreateImageItem(cuid: string, newImage: ImageInput, s3HeadBeforeCopy: boolean) {
     // Prepare to Create (or Update) an Image DynamoDB item using the S3-reference
     let createImage = () => this.db.createOrUpdateImage(cuid, newImage, "now", false);
     // Move the S3 object from upload to image bucket
-    let moveOp = await this.s3.moveUploadToImageBucket(cuid, newImage.md5, newImage, createImage);
-    // Success!
-    return {
-      awsResults: moveOp.awsResults,
-      image: moveOp.afterCopyCompleted
+    try {
+      let moveOp = await this.s3.moveUploadToImageBucket(cuid, newImage.md5, newImage, s3HeadBeforeCopy, createImage);
+      // Success!
+      return {
+        awsResults: moveOp.awsResults,
+        image: moveOp.afterCopyCompleted
+      }
+    } catch (reason) {
+      if (reason instanceof S3Error && reason.relatedObject.uploadMissing) {
+        return {
+          awsResults: {},
+          skipped: true,
+          uploadMissing: true,
+          reason
+        }
+      }
     }
   }
 
-  async _concurrentMoveUploadsAndCreateImageItems(cuids: string[], sha256: string, newImage: DynamoDBStreams.AttributeMap): AWSPromises {
+  async _concurrentMoveUploadsAndCreateImageItems(cuids: string[], sha256: string, s3HeadBeforeCopy:boolean, newImage: DynamoDBStreams.AttributeMap): AWSPromises {
     let jobs: Promise<AWSCompositeOp>[] = [];
     for (const cuid of cuids) {
       let input: ImageInput = {
@@ -557,7 +595,7 @@ export class ImageRepository_DynamoDB_StreamHandler {
         width: parseInt(newImage.width.N),
         height: parseInt(newImage.height.N)
       }
-      jobs.push(this._moveUploadAndCreateImageItem(cuid, input));
+      jobs.push(this._moveUploadAndCreateImageItem(cuid, input, s3HeadBeforeCopy));
     }
     return Promise.all(jobs)
       .then(job => job.reduce((array: AWSResults, result) => array.concat(Object.values(result.awsResults)), []))
@@ -574,7 +612,11 @@ export class ImageRepository_DynamoDB_StreamHandler {
         // This is to ensure completed uploads are eventually moved to the Image bucket and
         //  corresponding Image items created in DynamoDB.
         // If the upload mutation handler completed successfully, this should end up doing nothing.
-        return this._concurrentMoveUploadsAndCreateImageItems(newImage.images.SS, sha256, newImage)
+
+        // Before COPY, check if this sha256 already exists in the images bucket.
+        // It's likely to exist, because normally the mutation handler will complete
+        // before this Stream handler is triggered.
+        return this._concurrentMoveUploadsAndCreateImageItems(newImage.images.SS, sha256, true, newImage)
       case "REMOVE":
         // Delete from S3 when all references to an S3-object are removed from DynamoDB
         let deleteOp = this.s3.deleteUnreferencedImage({ sha256, mimetype: record.OldImage.mimetype.S }).promise()
@@ -593,7 +635,10 @@ export class ImageRepository_DynamoDB_StreamHandler {
         // B. Set has grown, copy the uploaded file to long-term S3 bucket
         else if (newImageRef.length > oldImageRef.length) {
           let newRefs = newImageRef.filter(v => oldImageRef.indexOf(v) == -1)
-          return this._concurrentMoveUploadsAndCreateImageItems(newRefs, sha256, newImage)
+          // Before COPY, check if this sha256 already exists in the images bucket.
+          // It's likely to exist, because normally the mutation handler will complete
+          // before this Stream handler is triggered.
+          return this._concurrentMoveUploadsAndCreateImageItems(newRefs, sha256, true, newImage)
         }
     }
 
@@ -689,7 +734,9 @@ export class ImageRepository {
     //4. Don't just wait for DynamoDB Streams handler, start the move process immediately!
     //   Create (or Update) an Image DynamoDB item using the S3-reference
     let createImage = () => this.db.createOrUpdateImage(id, { ...imageRef, title: imageRef.lastFileName }, "now", true);
-    let moveResult = await this.s3.moveUploadToImageBucket(id, md5, imageRef, createImage);
+    // COPY immediately without checking if this sha256 already exists in the images bucket.
+    // It's not likely to exist, because normally this method is used to create entirely new files.
+    let moveResult = await this.s3.moveUploadToImageBucket(id, md5, imageRef, false, createImage);
     return moveResult.afterCopyCompleted.image;
   }
 }

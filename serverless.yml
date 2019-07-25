@@ -84,6 +84,9 @@ resources:
         ProvisionedThroughput:
           ReadCapacityUnits: 1
           WriteCapacityUnits: 1
+        StreamSpecification:
+          StreamEnabled: true
+          StreamViewType: NEW_AND_OLD_IMAGES
         TableName: ${self:custom.S3RefsTableName}
     ImagesDynamoDBTable:
       Type: 'AWS::DynamoDB::Table'
