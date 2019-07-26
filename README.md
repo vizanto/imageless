@@ -23,7 +23,7 @@ To compile the sources to javascript run `serverless webpack -o out` and the res
 
 ## Exploring
 
-To explore the schema locally in a web browser run `serverless offline` and open the URL printed.
+To explore the schema locally in a web browser run `serverless offline start` and open [the URL printed](http://localhost:3000).
 
 
 
