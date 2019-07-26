@@ -53,6 +53,13 @@ export interface CollectionItem {
   lastModifiedAt: Date;
 }
 
+export class ValidationError extends Error {
+  readonly relatedObject: object;
+  constructor(message: string, relatedObject: object) {
+    super(message)
+    this.relatedObject = relatedObject;
+  }
+}
 
 /*------
   S3 ops
@@ -175,41 +182,40 @@ export class S3ImageRepositoryBuckets {
     // 1. Copy from upload to image bucket if not exists
     let s3Head: PromiseResult<S3.HeadObjectOutput, AWSError>;
     let s3HeadError: AWSError;
-    let s3Copy: PromiseResult<S3.CopyObjectOutput, AWSError>;
-    if (s3HeadBeforeCopy) {
-      // Check if destination already exists (HEAD is 12.5x cheaper in USD than a COPY request)
+    const s3HeadRequest = async () => {
       try {
+        // Check if destination already exists (HEAD is 12.5x cheaper in USD than a COPY request)
         s3Head = await this.headImage(image).promise();
       } catch (reason) {
         s3HeadError = reason
       }
+      if (s3Head && eTag !== s3Head.ETag) {
+        const message = `Uploaded file ETag '${s3Head.ETag}' differs from destination ETag '${eTag}' but has the same SHA256: ${image.sha256}`
+        throw new ValidationError(message, { eTagMismatch: true, cuid, eTag, image, s3Head })
+      }
     }
+    if (s3HeadBeforeCopy) await s3HeadRequest();
     // Try to copy from upload to image bucket
+    let s3Copy: PromiseResult<S3.CopyObjectOutput, AWSError>;
     try {
       s3Copy = await this.copyFromUploadBucket(cuid, eTag, image).promise();
     } catch (reason) {
       const failureMessage = "Couldn't copy " + cuid + " from upload bucket"
       if (reason.statusCode == 404) {
-        if (!s3HeadBeforeCopy) try {
-          // Check if the intended destination exists
-          s3Head = await this.headImage(image).promise();
-          // It exists! Continue as if upload was copied...
-        } catch (reason) {
-          s3HeadError = reason;
-        }
+        if (!s3HeadBeforeCopy) await s3HeadRequest();
         if (s3HeadError) {
           let uploadMissing = s3HeadError.statusCode == 404;
           const message = failureMessage + (uploadMissing ? " and " + this.urlOf(image) + " does not exist" : "");
-          console.log(message)
-          throw new S3Error(message, { uploadMissing, image }, s3HeadError);
+          // console.log(cuid, eTag, failureMessage, "reason=", reason, "s3Head=", s3Head, "s3HeadError=", s3HeadError)
+          throw new S3Error(message, { cuid, uploadMissing, image }, s3HeadError);
         }
       } else {
-        console.log(failureMessage)
-        throw new S3Error(failureMessage, { image }, s3HeadError);
+        // console.log(cuid, eTag, failureMessage, "reason=", reason, "s3Head=", s3Head, "s3HeadError=", s3HeadError)
+        throw new S3Error(failureMessage, { cuid, image }, s3HeadError);
       }
     }
     // 2. Notify caller copy was completed
-    let handlerResult = await onImageReady("copied");
+    let handlerResult = await onImageReady(s3Head ? "existed" : "copied");
     // 3. Success! Clean up the S3 upload bucket
     let s3Delete = await this.deleteFromUploadBucket(cuid).promise();
     return {
@@ -259,14 +265,6 @@ export const object_to_updateItemInput = (tableName: string, key: DynamoDB.Docum
 }
 
 const { S3REFS_TABLE, IMAGES_TABLE, COLLECTIONS_TABLE } = process.env;
-
-export class ValidationError extends Error {
-  readonly relatedObject: object;
-  constructor(message: string, relatedObject: object) {
-    super(message)
-    this.relatedObject = relatedObject;
-  }
-}
 
 export class DynamoDBImageRepositoryTables {
   readonly db: DynamoDB.DocumentClient;

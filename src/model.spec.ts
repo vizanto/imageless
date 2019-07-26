@@ -95,14 +95,28 @@ describe('S3 operations', () => {
       }
     });
 
-    it('should SUCCEED when upload (ID) does not exist, but destination (SHA-256) does', async () => {
-      await s3.upload('just-uploaded', notImageData).promise()
-      let copied = await s3.moveUploadToImageBucket('just-uploaded', notImageETag, notImageS3Key, false, (action) => Promise.resolve(action))
-      expect(copied.afterCopyCompleted).toBe('copied')
-      let result = await s3.moveUploadToImageBucket('never-uploaded', 'bogus', notImageS3Key, false, (action) => Promise.resolve(action))
-      expect(result.afterCopyCompleted).toBe('existed')
-      expect(result.awsResults.s3Delete).not.toBeNull()
-      expect(result.awsResults.s3Head.ETag).toBe(notImageETag)
+    it('should SUCCEED when upload (ID) does not exist, but destination (SHA-256 and MD5-ETag) does', async () => {
+      /**
+       * - This can happen when an S3ReferenceItem is processed where the uploaded S3-object is already deleted or expired
+       */
+      for (let headFirst of [false, true]) try {
+        // Sanity check upload and move works properly, and create the image for `notImageS3Key`
+        let id = 'just-uploaded-' + headFirst
+        await s3.upload(id, notImageData).promise()
+        let copied = await s3.moveUploadToImageBucket(id, notImageETag, notImageS3Key, true, (action) => Promise.resolve(action))
+        expect(copied.afterCopyCompleted).toBe(headFirst ? 'existed' : 'copied')
+        expect(copied.awsResults.s3Delete).not.toBeNull()
+        // Make sure ETag (MD5) is checked
+        let bogusMD5 = s3.moveUploadToImageBucket('never-uploaded', "bogus", notImageS3Key, headFirst, (action) => Promise.resolve(action))
+        expect(bogusMD5).rejects.toMatchObject({ relatedObject: { eTagMismatch: true, eTag: "bogus", s3Head: { ETag: notImageETag } } })
+        // Now check not-uploaded but target `notImageS3Key` exists
+        let result = await s3.moveUploadToImageBucket('never-uploaded', notImageETag, notImageS3Key, headFirst, (action) => Promise.resolve(action))
+        expect(result.afterCopyCompleted).toBe('existed')
+        expect(result.awsResults.s3Delete).not.toBeNull()
+        expect(result.awsResults.s3Head.ETag).toBe(notImageETag)
+      } catch (error) {
+        fail({ headFirst, error })
+      }
 
       // Cleanup after above tests
       await s3.deleteUnreferencedImage(notImageS3Key).promise()
